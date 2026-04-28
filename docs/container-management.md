@@ -82,10 +82,11 @@ Note: `gateway.yaml` changes are hot-reloaded — you don't need to restart the 
 
 | Host mount | Container path | Purpose |
 |---|---|---|
-| `./config/` | `/home/lainos/config/` | `gateway.yaml`, `cloudflared.yaml`, cloudflared credentials |
-| `./workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
-| `./config/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
-| `./local/` | `/home/lainos/.local/` | Nix profiles, local binaries |
+| `./config/` | — | Tracked example templates (not mounted) |
+| `./.data/config/` | `/home/lainos/config/` | `gateway.yaml`, `cloudflared.yaml`, cloudflared credentials |
+| `./.data/workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
+| `./.data/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
+| `./.data/local/` | `/home/lainos/.local/` | Nix profiles, local binaries |
 | `nix` (named volume) | `/nix` | Nix store |
 
 The `:Z` SELinux label is required on bind mounts for podman — this is already configured in `compose.yaml`.
@@ -100,4 +101,4 @@ podman-compose build --no-cache
 podman-compose up -d
 ```
 
-This will regenerate the SSH password and lose any state not on bind-mounted volumes. Your `config/`, `workspace/`, and `config/lain/` directories are preserved since they're bind-mounted from the host.
+This will regenerate the SSH password and lose any state not on bind-mounted volumes. Your `.data/` directory is preserved since it's bind-mounted from the host.

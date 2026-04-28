@@ -85,11 +85,14 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 
 | Host mount | Container path | Purpose |
 |---|---|---|
-| `./config/` | `/home/lainos/config/` | `gateway.yaml`, `cloudflared.yaml`, cloudflared credentials |
-| `./workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
-| `./config/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
+| `./config/` | — | Tracked example templates (not mounted) |
+| `./.data/config/` | `/home/lainos/config/` | `gateway.yaml`, `cloudflared.yaml`, cloudflared credentials |
+| `./.data/workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
+| `./.data/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
+| `./.data/local/` | `/home/lainos/.local/` | Nix profiles, local binaries |
 
 - Config changes to `gateway.yaml` are hot-reloaded (no restart needed)
+- Runtime data lives in `.data/` (gitignored); tracked templates live in `config/`
 - The `:Z` SELinux label is required on volume mounts for podman
 
 ## Code Style
@@ -120,7 +123,7 @@ User-facing documentation lives in `docs/` and is available inside the container
 
 - Build file is `Containerfile` (not `Dockerfile`) — podman naming
 - Compose file is `compose.yaml` (not `docker-compose.yml`)
-- Example configs use `.example.yaml` suffix in `config/`
+- Example configs use `.example.yaml` / `.example.md` suffix in `config/`
 - Systemd unit files go in `systemd/`
 - Shell scripts go in `scripts/`
 - Systemd presets go in `systemd/` as `98-lainos.preset` (must sort before `99-default-disable.preset`)

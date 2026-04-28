@@ -69,28 +69,16 @@ echo ""
 echo -e "${BOLD}  ── checking config ──────────────────────────${RESET}"
 echo ""
 
-ensure_config config/gateway.example.yaml config/gateway.yaml "gateway.yaml"
-ensure_config config/cloudflared.example.yaml config/cloudflared.yaml "cloudflared.yaml"
+mkdir -p .data/config .data/workspace .data/local .data/lain/profiles/default
 
-if [ ! -d workspace ]; then
-    mkdir -p workspace
-    echo -e "  ${GREEN}created${RESET} workspace/"
-else
-    echo -e "  ${DIM}exists${RESET}  workspace/"
-fi
-
-if [ ! -d local ]; then
-    mkdir -p local
-    echo -e "  ${GREEN}created${RESET} local/"
-else
-    echo -e "  ${DIM}exists${RESET}  local/"
-fi
+ensure_config config/gateway.example.yaml .data/config/gateway.yaml "gateway.yaml"
+ensure_config config/cloudflared.example.yaml .data/config/cloudflared.yaml "cloudflared.yaml"
 
 echo ""
 echo -e "${BOLD}  ── lain profile setup ──────────────────────${RESET}"
 echo ""
 
-LAIN_DIR="config/lain/profiles/default"
+LAIN_DIR=".data/lain/profiles/default"
 mkdir -p "$LAIN_DIR"
 
 if [ ! -f "$LAIN_DIR/config.yaml" ]; then
@@ -120,64 +108,7 @@ else
     echo -e "  ${DIM}exists${RESET}  lain default profile config"
 fi
 
-if [ ! -f "$LAIN_DIR/agents.md" ]; then
-    cat > "$LAIN_DIR/agents.md" <<'AGENTS'
-# Lain Assistant
-
-You are a helpful coding and system administration assistant running inside a Linux container.
-
-You have access to system commands via the `run_command` tool. Use it freely to:
-- Explore the filesystem
-- Run build and test commands
-- Inspect running processes and services
-- Execute any shell commands needed to help the user
-
-Always explain what you're doing before running commands. When writing code or config files,
-show the content first, then write it.
-
-Be concise. Prefer action over explanation.
-
-## No `sudo`
-
-The `lainos` user is unprivileged. **Never use `sudo`.** It is not available and will fail.
-
-If you need to install software, use `nix`:
-
-- `nix profile install nixpkgs#<package>` to install a package
-- Installed binaries are automatically available in PATH
-- `nix profile list` to see installed packages
-- `nix profile remove <index>` to remove a package
-- `nix-collect-garbage` to free disk space from old packages
-
-This keeps the host container clean while giving you full package access.
-
-## Task Management
-
-You have a `todo` tool for tracking tasks across a session. Use it to stay organized on multi-step work.
-
-### When to use it
-
-- When the user asks you to do something with multiple steps
-- When you're working through a sequence of changes (files, configs, commands)
-- When the user asks you to track progress on something
-
-### How to use it
-
-- `todo(action="add", task="description")` — add a task
-- `todo(action="list")` — show all tasks and their status
-- `todo(action="complete", id=N)` — mark task N as done
-- `todo(action="uncomplete", id=N)` — revert task N to pending
-- `todo(action="remove", id=N)` — delete a task
-- `todo(action="clear")` — remove all completed tasks
-
-### After context compaction
-
-When the system compacts the conversation context, your task list is automatically injected into the new context. You should still call `todo(action="list")` to verify your progress and ensure nothing was lost. If the user's original goal involved tracked tasks, continue working through the remaining items.
-AGENTS
-    echo -e "  ${GREEN}created${RESET} lain default agents.md"
-else
-    echo -e "  ${DIM}exists${RESET}  lain agents.md"
-fi
+ensure_config config/agents.example.md "$LAIN_DIR/agents.md" "lain agents.md"
 
 if [ ! -f "$LAIN_DIR/servers.json" ]; then
     echo '{"mcpServers":{}}' > "$LAIN_DIR/servers.json"

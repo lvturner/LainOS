@@ -1,14 +1,7 @@
-config/cloudflared.yaml
-config/gateway.yaml
-config/lain/
-
-local/
-
-workspace/cert.pem
-workspace/scripts/
-workspace/logs/
+.data/
 
 gateway/wh-gateway
 lain/lain
 
 *.swp
+compose.override.yaml
