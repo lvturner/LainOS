@@ -17,6 +17,7 @@ chown -R lainos:lainos /home/lainos/.config/systemd
 PASSWORD=$(openssl rand -base64 18)
 echo "lainos:$PASSWORD" | chpasswd
 
+chown lainos:lainos /home/lainos
 chown -R lainos:lainos /home/lainos/.local
 chown -R lainos:lainos /home/lainos/config
 chown -R lainos:lainos /home/lainos/workspace
