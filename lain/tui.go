@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,6 +63,7 @@ type model struct {
 	llmClient      *LLMClient
 	viewport       viewport.Model
 	textarea       textarea.Model
+	spinner        spinner.Model
 	messages       []ChatMessage
 	current        *ChatMessage
 	streaming      bool
@@ -87,6 +89,11 @@ func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model 
 	ta.ShowLineNumbers = false
 	ta.Focus()
 
+	sp := spinner.New(spinner.WithSpinner(spinner.Spinner{
+		Frames: []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		FPS:    100 * time.Millisecond,
+	}))
+
 	llmClient := NewLLMClient(profile.Config, profile.Agents, profile.AgentsPath, registry.AllTools(), registry)
 	session := NewSession(profileName)
 
@@ -103,6 +110,7 @@ func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model 
 		llmClient:       llmClient,
 		viewport:        viewport.New(80, 20),
 		textarea:        ta,
+		spinner:         sp,
 		messages:        []ChatMessage{},
 		currentSession:  session,
 		titleGenPending: true,
@@ -148,6 +156,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case statusClearMsg:
 		m.statusMsg = ""
 		m.refreshView()
+		return m, nil
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		if m.streaming {
+			return m, cmd
+		}
 		return m, nil
 	case tea.KeyMsg:
 		return m.handleKey(msg)
@@ -249,7 +264,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancelFn = cancel
 		m.streamCh = m.llmClient.Chat(ctx, input)
-		return m, waitForStreamEvent(m.streamCh)
+		return m, tea.Batch(waitForStreamEvent(m.streamCh), m.spinner.Tick)
 	default:
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
@@ -394,9 +409,10 @@ func (m model) handleQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) viewportHeight() int {
 	bannerH := 9
+	statusH := 1
 	textareaH := 3
 	sepH := 1
-	vpHeight := m.height - bannerH - textareaH - sepH
+	vpHeight := m.height - bannerH - statusH - textareaH - sepH
 	if vpHeight < 5 {
 		vpHeight = 5
 	}
@@ -517,12 +533,16 @@ func (m model) View() string {
 		)
 	}
 
-	var inputArea string
+	var statusBar string
 	if m.statusMsg != "" {
-		inputArea = statusStyle.Render("  " + m.statusMsg + "\n")
+		statusBar = statusStyle.Render("  " + m.statusMsg)
+	} else if m.streaming {
+		statusBar = statusStyle.Render("  " + m.spinner.View() + " thinking...")
 	} else {
-		inputArea = inputStyle.Render(m.textarea.View())
+		statusBar = " "
 	}
+
+	inputArea := inputStyle.Render(m.textarea.View())
 
 	sidebar := m.renderTodoSidebar(m.viewportHeight())
 	chatWithSidebar := lipgloss.JoinHorizontal(lipgloss.Top,
@@ -533,6 +553,7 @@ func (m model) View() string {
 		banner,
 		chatWithSidebar,
 		sep,
+		statusBar,
 		inputArea,
 	)
 }

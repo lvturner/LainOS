@@ -5,6 +5,15 @@ if [ -z "$(ls -A /home/lainos 2>/dev/null)" ]; then
     cp -a /etc/skel-lainos/. /home/lainos/
 fi
 
+mkdir -p /home/lainos/.config/systemd/user
+for unit in /etc/skel-lainos/.config/systemd/user/*.service; do
+    name=$(basename "$unit")
+    if [ ! -e "/home/lainos/.config/systemd/user/$name" ]; then
+        cp "$unit" "/home/lainos/.config/systemd/user/$name"
+    fi
+done
+chown -R lainos:lainos /home/lainos/.config/systemd
+
 PASSWORD=$(openssl rand -base64 18)
 echo "lainos:$PASSWORD" | chpasswd
 
@@ -14,13 +23,13 @@ chown -R lainos:lainos /home/lainos/workspace
 chown -R lainos:lainos /home/lainos/.config
 chown lainos:lainos /nix 2>/dev/null || true
 
-if [ ! -e /home/lainos/.nix-profile ]; then
-    ln -s /nix/var/nix/profiles/default /home/lainos/.nix-profile
+if [ ! -e /home/lainos/.nix-profile ] || [ -L /home/lainos/.nix-profile ]; then
+    ln -sf /nix/var/nix/profiles/default /home/lainos/.nix-profile
     chown -h lainos:lainos /home/lainos/.nix-profile
 fi
 
-if [ ! -e /home/lainos/.nix-defexpr ]; then
-    ln -s /nix/var/nix/defexpr/per-user/lainos /home/lainos/.nix-defexpr
+if [ ! -e /home/lainos/.nix-defexpr ] || [ -L /home/lainos/.nix-defexpr ]; then
+    ln -sf /nix/var/nix/defexpr/per-user/lainos /home/lainos/.nix-defexpr
     chown -h lainos:lainos /home/lainos/.nix-defexpr
 fi
 
