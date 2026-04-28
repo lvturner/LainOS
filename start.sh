@@ -74,6 +74,19 @@ mkdir -p .data/config .data/workspace .data/local .data/lain/profiles/default
 ensure_config config/gateway.example.yaml .data/config/gateway.yaml "gateway.yaml"
 ensure_config config/cloudflared.example.yaml .data/config/cloudflared.yaml "cloudflared.yaml"
 
+if [ ! -d .data/workspace/examples ]; then
+    if [ -d examples ]; then
+        cp -r examples .data/workspace/examples
+        echo -e "  ${GREEN}created${RESET} workspace examples"
+    else
+        echo -e "  ${RED}missing${RESET} workspace examples — no examples/ directory found"
+    fi
+else
+    echo -e "  ${DIM}exists${RESET}  workspace examples"
+fi
+
+mkdir -p .data/workspace/logs .data/workspace/scripts
+
 echo ""
 echo -e "${BOLD}  ── lain profile setup ──────────────────────${RESET}"
 echo ""

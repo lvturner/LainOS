@@ -61,7 +61,7 @@ The gateway watches `gateway.yaml` via fsnotify. On file write/create events (de
 
 ### 1. Write a handler script
 
-Place it in `workspace/scripts/` and make it executable:
+Place it in `/home/lainos/workspace/scripts/` and make it executable:
 
 ```bash
 mkdir -p workspace/scripts

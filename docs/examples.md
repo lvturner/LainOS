@@ -1,10 +1,10 @@
 # Webhook Handler Examples
 
-Example scripts live in `workspace/examples/`. Copy them to `workspace/scripts/`, remove the `.example` suffix, and customize as needed.
+Example scripts live in `/home/lainos/workspace/examples/`. Copy them to `/home/lainos/workspace/scripts/`, remove the `.example` suffix, and customize as needed.
 
 ## Shared Library: Signature Verification
 
-`workspace/examples/lib/verify-github-signature.sh` verifies the `X-Hub-Signature-256` header using HMAC-SHA256. Source it at the top of any GitHub webhook handler:
+`/home/lainos/workspace/examples/lib/verify-github-signature.sh` verifies the `X-Hub-Signature-256` header using HMAC-SHA256. Source it at the top of any GitHub webhook handler:
 
 ```bash
 SECRET="your-webhook-secret"
@@ -76,7 +76,7 @@ echo "Commits: ${COMMIT_COUNT}"
 
 ## Async Handler Pattern
 
-`handle-github-push-async.sh.example` — Returns immediately (HTTP 200) while processing in the background. Logs output to `workspace/logs/`.
+`handle-github-push-async.sh.example` — Returns immediately (HTTP 200) while processing in the background. Logs output to `/home/lainos/workspace/logs/`.
 
 ```bash
 #!/bin/bash
@@ -98,7 +98,7 @@ BRANCH=$(echo "$REF" | sed 's|refs/heads/||')
 echo "accepted: push to ${REPO}:${BRANCH}"
 ```
 
-The subshell runs in the background (`&`), so the gateway gets an immediate response. Logs are written to `workspace/logs/` for later review.
+The subshell runs in the background (`&`), so the gateway gets an immediate response. Logs are written to `/home/lainos/workspace/logs/` for later review.
 
 ## Issue Handler
 

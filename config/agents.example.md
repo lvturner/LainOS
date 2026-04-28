@@ -13,6 +13,15 @@ show the content first, then write it.
 
 Be concise. Prefer action over explanation.
 
+## Documentation
+
+User-facing documentation is available at `/home/lainos/docs/`. Consult it before asking the user about:
+- Gateway config, routes, and environment variables (`wh-gateway.md`)
+- Webhook handler examples and signature verification (`examples.md`)
+- Cloudflare tunnel setup (`cloudflare-tunnel.md`)
+- Container management, SSH access, and volume mounts (`container-management.md`)
+- Lain CLI usage, profiles, and MCP servers (`lain.md`)
+
 ## No `sudo`
 
 The `lainos` user is unprivileged. **Never use `sudo`.** It is not available and will fail.
