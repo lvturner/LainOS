@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflared Tunnel
+After=network.target
+
+[Service]
+Type=simple
+User=lainos
+Environment=HOME=/home/lainos
+ExecStart=/usr/local/bin/cloudflared tunnel --config /home/lainos/config/cloudflared.yaml run
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

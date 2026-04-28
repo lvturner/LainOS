@@ -1,0 +1,17 @@
+[Unit]
+Description=Webhook Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=lainos
+Environment=HOME=/home/lainos
+Environment=PATH=/home/lainos/.nix-profile/bin:/home/lainos/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=NIX_PATH=nixpkgs=/home/lainos/.nix-defexpr/channels/nixpkgs
+Environment=NIX_SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
+ExecStart=/usr/local/bin/wh-gateway -config /home/lainos/config/gateway.yaml
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

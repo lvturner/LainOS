@@ -1,0 +1,31 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "push" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+REF=$(echo "$BODY" | jq -r '.ref')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+BRANCH=$(echo "$REF" | sed 's|refs/heads/||')
+
+(
+  sleep 5
+
+  AFTER=$(echo "$BODY" | jq -r '.after')
+  COMMIT_COUNT=$(echo "$BODY" | jq '.commits | length')
+
+  echo "Starting build for ${REPO}:${BRANCH}"
+  echo "Commits: ${COMMIT_COUNT}"
+  echo "Head: ${AFTER:0:7}"
+
+  echo "Build complete for ${REPO}:${BRANCH}"
+) >/home/lainos/workspace/logs/"push-${REPO//\//-}-${BRANCH}-$(date +%s).log" 2>&1 &
+
+echo "accepted: push to ${REPO}:${BRANCH}"

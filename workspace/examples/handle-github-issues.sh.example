@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "issues" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+ISSUE_NUMBER=$(echo "$BODY" | jq -r '.issue.number')
+ISSUE_TITLE=$(echo "$BODY" | jq -r '.issue.title')
+ISSUE_USER=$(echo "$BODY" | jq -r '.issue.user.login')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+
+echo "Issue #${ISSUE_NUMBER} ${ACTION} by ${ISSUE_USER}"
+echo "Title: ${ISSUE_TITLE}"
+echo "Repo: ${REPO}"
+
+if [ "$ACTION" = "opened" ]; then
+  echo ""
+  echo "Body preview:"
+  echo "$BODY" | jq -r '.issue.body' | head -10
+elif [ "$ACTION" = "closed" ]; then
+  echo "Issue closed"
+fi

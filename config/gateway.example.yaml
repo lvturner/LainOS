@@ -1,0 +1,16 @@
+server:
+  listen: "0.0.0.0:8080"
+  timeout: 30s
+
+routes:
+  - path: "/webhook/github"
+    command: "/home/lainos/workspace/scripts/handle-github.sh"
+    method: "POST"
+
+  - path: "/webhook/github/async"
+    command: "/home/lainos/workspace/scripts/handle-github-push-async.sh"
+    method: "POST"
+
+  - path: "/webhook/deploy"
+    command: "/home/lainos/workspace/scripts/deploy.sh"
+    method: "POST"

@@ -1,0 +1,41 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "release" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+TAG=$(echo "$BODY" | jq -r '.release.tag_name')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+
+(
+  sleep 2
+
+  DRAFT=$(echo "$BODY" | jq -r '.release.draft')
+  PRERELEASE=$(echo "$BODY" | jq -r '.release.prerelease')
+  AUTHOR=$(echo "$BODY" | jq -r '.release.author.login')
+
+  echo "Processing release ${ACTION}: ${TAG}"
+  echo "Repo: ${REPO}"
+  echo "By: ${AUTHOR}"
+
+  if [ "$ACTION" = "published" ] && [ "$DRAFT" = "false" ]; then
+    ASSETS=$(echo "$BODY" | jq -r '.release.assets[]? | .browser_download_url')
+
+    echo "Downloading assets..."
+    echo "Deploying release ${TAG}..."
+
+    echo "Release ${TAG} deployed"
+  fi
+
+  echo "Done processing release ${TAG}"
+) >/home/lainos/workspace/logs/"release-${REPO//\//--}-${TAG}-$(date +%s).log" 2>&1 &
+
+echo "accepted: release ${ACTION} ${TAG}"

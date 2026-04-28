@@ -1,0 +1,40 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "pull_request" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+PR_NUMBER=$(echo "$BODY" | jq -r '.number')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+
+(
+  sleep 2
+
+  PR_TITLE=$(echo "$BODY" | jq -r '.pull_request.title')
+  PR_BRANCH=$(echo "$BODY" | jq -r '.pull_request.head.ref')
+  PR_BASE=$(echo "$BODY" | jq -r '.pull_request.base.ref')
+  PR_SHA=$(echo "$BODY" | jq -r '.pull_request.head.sha')
+  CLONE_URL=$(echo "$BODY" | jq -r '.pull_request.head.repo.clone_url')
+
+  echo "Running CI for PR #${PR_NUMBER}: ${PR_BRANCH} → ${PR_BASE}"
+  echo "SHA: ${PR_SHA}"
+  echo "Clone: ${CLONE_URL}"
+
+  if [ "$ACTION" = "opened" ] || [ "$ACTION" = "synchronize" ]; then
+    echo "CI pipeline would run here"
+  elif [ "$ACTION" = "closed" ]; then
+    echo "PR closed - cleaning up CI resources"
+  fi
+
+  echo "Done with PR #${PR_NUMBER}"
+) >/home/lainos/workspace/logs/"pr-${REPO//\//--}-${PR_NUMBER}-$(date +%s).log" 2>&1 &
+
+echo "accepted: PR #${PR_NUMBER} ${ACTION}"

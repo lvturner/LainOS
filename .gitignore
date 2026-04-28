@@ -1,0 +1,14 @@
+config/cloudflared.yaml
+config/gateway.yaml
+config/lain/
+
+local/
+
+workspace/cert.pem
+workspace/scripts/
+workspace/logs/
+
+gateway/wh-gateway
+lain/lain
+
+*.swp

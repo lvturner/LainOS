@@ -1,0 +1,30 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "pull_request" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+PR_NUMBER=$(echo "$BODY" | jq -r '.number')
+PR_TITLE=$(echo "$BODY" | jq -r '.pull_request.title')
+PR_USER=$(echo "$BODY" | jq -r '.pull_request.user.login')
+PR_BRANCH=$(echo "$BODY" | jq -r '.pull_request.head.ref')
+PR_BASE=$(echo "$BODY" | jq -r '.pull_request.base.ref')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+MERGEABLE=$(echo "$BODY" | jq -r '.pull_request.mergeable // "unknown"')
+
+echo "PR #${PR_NUMBER} ${ACTION} by ${PR_USER}"
+echo "Title: ${PR_TITLE}"
+echo "Branch: ${PR_BRANCH} → ${PR_BASE}"
+echo "Mergeable: ${MERGEABLE}"
+
+if [ "$ACTION" = "opened" ] || [ "$ACTION" = "synchronize" ]; then
+  echo "Running quick checks..."
+fi

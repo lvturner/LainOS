@@ -1,0 +1,36 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "release" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+TAG=$(echo "$BODY" | jq -r '.release.tag_name')
+NAME=$(echo "$BODY" | jq -r '.release.name // empty')
+DRAFT=$(echo "$BODY" | jq -r '.release.draft')
+PRERELEASE=$(echo "$BODY" | jq -r '.release.prerelease')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+AUTHOR=$(echo "$BODY" | jq -r '.release.author.login')
+
+echo "Release ${ACTION}: ${TAG}"
+echo "Repo: ${REPO}"
+echo "By: ${AUTHOR}"
+echo "Draft: ${DRAFT}, Pre-release: ${PRERELEASE}"
+
+if [ -n "$NAME" ]; then
+  echo "Name: ${NAME}"
+fi
+
+ASSET_COUNT=$(echo "$BODY" | jq '.release.assets | length')
+echo "Assets: ${ASSET_COUNT}"
+
+if [ "$ACTION" = "published" ]; then
+  echo "$BODY" | jq -r '.release.assets[]? | "\(.name) \(.size) \(.browser_download_url)"'
+fi

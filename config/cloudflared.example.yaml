@@ -1,0 +1,6 @@
+tunnel: <your-tunnel-id>
+credentials-file: /home/lainos/config/cloudflared/credentials.json
+ingress:
+  - hostname: webhooks.example.com
+    service: http://localhost:8080
+  - service: http_status:404

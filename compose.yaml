@@ -1,0 +1,18 @@
+services:
+  lainos:
+    build: .
+    container_name: lainos
+    privileged: true
+    network_mode: host
+    command: /usr/local/bin/init-wrapper.sh
+    stop_signal: SIGRTMIN+3
+    volumes:
+      - ./config:/home/lainos/config:Z
+      - ./workspace:/home/lainos/workspace:Z
+      - ./config/lain:/home/lainos/.config/lain:Z
+      - ./local:/home/lainos/.local:Z
+      - nix:/nix
+    restart: unless-stopped
+
+volumes:
+  nix:

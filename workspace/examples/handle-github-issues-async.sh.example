@@ -1,0 +1,38 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+EVENT="$WH_HEADER_X_GITHUB_EVENT"
+
+if [ "$EVENT" != "issues" ]; then
+  echo "unexpected event: $EVENT" >&2
+  exit 1
+fi
+
+ACTION=$(echo "$BODY" | jq -r '.action')
+ISSUE_NUMBER=$(echo "$BODY" | jq -r '.issue.number')
+REPO=$(echo "$BODY" | jq -r '.repository.full_name')
+
+(
+  sleep 2
+
+  ISSUE_TITLE=$(echo "$BODY" | jq -r '.issue.title')
+  ISSUE_USER=$(echo "$BODY" | jq -r '.issue.user.login')
+  ISSUE_BODY=$(echo "$BODY" | jq -r '.issue.body')
+
+  echo "Processing issue #${ISSUE_NUMBER} ${ACTION}"
+  echo "Title: ${ISSUE_TITLE}"
+  echo "By: ${ISSUE_USER}"
+
+  if [ "$ACTION" = "opened" ]; then
+    echo "Triaging new issue"
+  elif [ "$ACTION" = "closed" ]; then
+    echo "Issue closed - updating metrics"
+  fi
+
+  echo "Done processing issue #${ISSUE_NUMBER}"
+) >/home/lainos/workspace/logs/"issue-${REPO//\//--}-${ISSUE_NUMBER}-$(date +%s).log" 2>&1 &
+
+echo "accepted: issue #${ISSUE_NUMBER} ${ACTION}"

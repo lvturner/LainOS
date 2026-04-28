@@ -1,0 +1,12 @@
+[Unit]
+Description=First Boot Setup
+Before=sshd.service
+ConditionPathExists=!/var/lib/lainos/.setup-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/first-boot-setup.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

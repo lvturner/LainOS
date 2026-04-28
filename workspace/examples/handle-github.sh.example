@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+SECRET="your-webhook-secret"
+source /home/lainos/workspace/examples/lib/verify-github-signature.sh
+
+echo "Received GitHub webhook"
+echo "Method: $WH_METHOD"
+echo "Path:   $WH_PATH"
+echo "Event:  $WH_HEADER_X_GITHUB_EVENT"
+echo "Body: $BODY"
