@@ -181,13 +181,32 @@ echo ""
 echo -e "${BOLD}  ── waiting for container ────────────────────${RESET}"
 echo ""
 
-for i in $(seq 1 30); do
+for i in $(seq 1 90); do
     STATE=$(podman exec lainos systemctl is-system-running 2>/dev/null || true)
     if [[ "$STATE" == "running" || "$STATE" == "degraded" ]]; then
         break
     fi
+    printf "\r  ${DIM}waiting for systemd... %ds${RESET}" "$i"
     sleep 1
 done
+echo ""
+
+if [[ "$STATE" != "running" && "$STATE" != "degraded" ]]; then
+    echo -e "  ${RED}Container did not start within 90s (state: ${STATE})${RESET}"
+    echo -e "  ${DIM}Check logs: podman logs lainos${RESET}"
+    exit 1
+fi
+
+if [[ "$STATE" == "degraded" ]]; then
+    echo -e "  ${YELLOW}System is degraded — some services failed:${RESET}"
+    podman exec lainos systemctl --failed --no-legend 2>/dev/null | while IFS= read -r line; do
+        echo -e "    ${RED}${line}${RESET}"
+    done
+    echo ""
+else
+    echo -e "  ${GREEN}System is running.${RESET}"
+    echo ""
+fi
 
 if ! podman exec lainos test -f /var/lib/lainos/.password 2>/dev/null; then
     podman exec lainos systemctl start first-boot-setup.service 2>/dev/null || true
