@@ -17,7 +17,7 @@ Agent frameworks like [Hermes](https://github.com/nousresearch/hermes-agent) and
 ./start.sh
 ```
 
-`start.sh` handles everything: copying example configs, setting up the lain profile, building the container, and displaying credentials. It drops you into a lain shell when done.
+`start.sh` handles everything: copying example configs, setting up the lain profile, building the container, and displaying credentials. It drops you into a lain shell when done. When you exit the shell, the container keeps running in the background. Re-attach with `./shell.sh`.
 
 Manual alternative:
 
@@ -101,6 +101,7 @@ Installed binaries are immediately available in PATH. The container's root files
 
 ```bash
 ./start.sh                      # Build, start, open lain shell
+./shell.sh                      # Re-open lain shell (container runs in background)
 podman-compose up -d --build    # Rebuild after code changes
 podman logs -f lainos           # View logs
 podman-compose down             # Stop

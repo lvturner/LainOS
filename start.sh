@@ -31,12 +31,63 @@ ensure_config() {
 }
 
 echo ""
-echo -e "${CYAN}  ██╗      ██╗     ███████╗ ██████╗ ███╗   ██╗"
-echo -e "${CYAN}  ██║      ██║     ██╔════╝██╔═══██╗████╗  ██║"
-echo -e "${CYAN}  ██║      ██║     █████╗  ██║   ██║██╔██╗ ██║"
-echo -e "${CYAN}  ██║      ██║     ██╔══╝  ██║   ██║██║╚██╗██║"
-echo -e "${CYAN}  ███████╗ ███████╗███████╗╚██████╔╝██║ ╚████║"
-echo -e "${CYAN}  ╚══════╝ ╚══════╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝${RESET}"
+echo -e "${BOLD}  ── security check ──────────────────────────${RESET}"
+echo ""
+
+CURRENT_USER=$(whoami)
+
+if [ "$CURRENT_USER" != "lainos" ]; then
+    echo -e "  ${YELLOW}LainOS gives AI agents access to a real Linux environment.${RESET}"
+    echo -e "  ${YELLOW}Running under a dedicated user isolates potential damage.${RESET}"
+    echo ""
+    read -p "  Create a 'lainos' user? [Y/n] " create_user
+    create_user="${create_user:-Y}"
+
+    if [[ "$create_user" =~ ^[Yy]$ ]]; then
+        if ! command -v sudo >/dev/null 2>&1; then
+            echo -e "  ${RED}sudo is required to create the lainos user.${RESET}"
+            exit 1
+        fi
+
+        if id "lainos" >/dev/null 2>&1; then
+            echo -e "  ${DIM}exists${RESET}  user lainos"
+        else
+            sudo useradd -m lainos
+            echo -e "  ${GREEN}created${RESET} user lainos"
+        fi
+
+        if ! sudo test -u /usr/bin/newuidmap; then
+            sudo chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
+            echo -e "  ${GREEN}set${RESET} newuidmap/newgidmap setuid"
+        fi
+
+        sudo cp -r "$SCRIPT_DIR" /home/lainos/wh-gateway
+        sudo chown -R lainos:lainos /home/lainos/wh-gateway
+        echo -e "  ${GREEN}copied${RESET} project to /home/lainos/wh-gateway"
+        echo ""
+        echo -e "  ${GREEN}Re-launching as lainos...${RESET}"
+        echo ""
+
+        exec sudo su - lainos -c "cd /home/lainos/wh-gateway && ./start.sh"
+    fi
+
+    echo ""
+    echo -e "  ${RED}⚠  The AI agent will run with full access to your user account.${RESET}"
+    echo -e "  ${RED}   Unintended data loss is possible. Are you sure? [y/N]${RESET}"
+    echo ""
+    read -p "  " confirm
+    if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
+        echo -e "  ${DIM}Aborting. Create the lainos user and try again.${RESET}"
+        exit 1
+    fi
+fi
+
+echo ""
+echo -e "${CYAN}   |          _)        _ \   ___|  "
+echo -e "${CYAN}   |      _\` | | __ \  |   |\___ \  "
+echo -e "${CYAN}   |     (   | | |   | |   |      | "
+echo -e "${CYAN}_____|\\__,_|_|_|  _|\\___/ _____/  "
+echo -e "${CYAN}                                   ${RESET}"
 echo ""
 echo -e "  ${BOLD}LainOS${RESET} ${DIM}• ucore + podman${RESET}"
 echo ""
@@ -221,3 +272,11 @@ echo -e "${GREEN}  Opening LainOS shell...${RESET}"
 echo ""
 
 podman exec -it -u lainos -w /home/lainos lainos /usr/local/bin/lain
+
+echo ""
+echo -e "${GREEN}  LainOS is still running in the background.${RESET}"
+echo ""
+echo -e "  ${DIM}Shell:${RESET}   ./shell.sh"
+echo -e "  ${DIM}Logs:${RESET}    podman logs -f lainos"
+echo -e "  ${DIM}Stop:${RESET}    podman-compose down"
+echo ""
