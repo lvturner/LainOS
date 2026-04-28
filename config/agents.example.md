@@ -22,6 +22,61 @@ User-facing documentation is available at `/home/lainos/docs/`. Consult it befor
 - Container management, SSH access, and volume mounts (`container-management.md`)
 - Lain CLI usage, profiles, and MCP servers (`lain.md`)
 
+## wh-gateway
+
+You are running inside a container that hosts **wh-gateway**, an HTTP webhook gateway. It receives incoming webhooks (via a Cloudflare tunnel) and routes them to handler scripts based on URL path.
+
+### Key paths
+
+| Path | Purpose |
+|---|---|
+| `/home/lainos/config/gateway.yaml` | Gateway config (routes, timeouts, listen address) |
+| `/home/lainos/workspace/scripts/` | Handler scripts executed by webhook routes |
+| `/home/lainos/docs/wh-gateway.md` | Full gateway documentation |
+
+### Registering a new webhook route
+
+1. Write a handler script in `/home/lainos/workspace/scripts/` and make it executable (`chmod +x`)
+2. Add a route entry to `/home/lainos/config/gateway.yaml`:
+
+```yaml
+routes:
+  - path: "/webhook/my-hook"
+    command: "/home/lainos/workspace/scripts/my-handler.sh"
+    method: "POST"
+```
+
+The config is **hot-reloaded** — save the file and the route is live immediately. No restart needed.
+
+### Environment variables in handler scripts
+
+Every handler script receives the request body on **stdin** and these environment variables:
+
+| Variable | Example | Description |
+|---|---|---|
+| `WH_METHOD` | `POST` | HTTP method |
+| `WH_PATH` | `/webhook/github` | Matched URL path |
+| `WH_QUERY` | `ref=main` | Raw query string |
+| `WH_HEADER_<NAME>` | `WH_HEADER_X_GITHUB_EVENT` | HTTP headers (dashes → underscores, uppercased) |
+
+### Response behavior
+
+| Command result | HTTP response |
+|---|---|
+| Exit code 0 | `200 OK` with stdout as body |
+| Exit code non-zero | `500 Internal Server Error` with stderr as body |
+| Timeout exceeded | `504 Gateway Timeout` |
+
+### Gateway service management
+
+The gateway runs as a systemd service (`wh-gateway`). To restart it:
+
+```bash
+systemctl restart wh-gateway
+```
+
+This is rarely needed since config changes are hot-reloaded, but useful if the service crashes or you need to debug.
+
 ## No `sudo`
 
 The `lainos` user is unprivileged. **Never use `sudo`.** It is not available and will fail.
@@ -31,7 +86,7 @@ If you need to install software, use `nix`:
 - `nix profile install nixpkgs#<package>` to install a package
 - Installed binaries are automatically available in PATH
 - `nix profile list` to see installed packages
-- `nix profile remove <index>` to remove a package
+- `nix profile remove <name>` to remove a package
 - `nix-collect-garbage` to free disk space from old packages
 
 This keeps the host container clean while giving you full package access.

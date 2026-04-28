@@ -90,10 +90,31 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 | `./.data/workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
 | `./.data/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
 | `./.data/local/` | `/home/lainos/.local/` | Nix profiles, local binaries |
+| *(named volume)* | `/nix` | Nix store — persists across container rebuilds |
 
 - Config changes to `gateway.yaml` are hot-reloaded (no restart needed)
 - Runtime data lives in `.data/` (gitignored); tracked templates live in `config/`
 - The `:Z` SELinux label is required on volume mounts for podman
+
+## Nix Package Management
+
+The container has Nix installed for the `lainos` user (single-user mode, no daemon). Use it to install tools that handler scripts or the lain agent need. There is no `sudo` — Nix is the only way to install software.
+
+```bash
+# Install a package
+nix profile install nixpkgs#jq
+
+# List installed packages
+nix profile list
+
+# Remove a package by name
+nix profile remove jq
+
+# Free disk space from old packages
+nix-collect-garbage
+```
+
+Installed binaries are immediately available in PATH. Packages persist across container rebuilds via the `/nix` named volume and `~/.local` bind mount.
 
 ## Code Style
 

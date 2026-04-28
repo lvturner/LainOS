@@ -40,7 +40,10 @@ RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon && \
     mkdir -p /home/lainos/.config/nix && \
     echo 'experimental-features = nix-command flakes' > /home/lainos/.config/nix/nix.conf && \
     /home/lainos/.nix-profile/bin/nix-channel --add https://nixos.org/channels/nixpkgs-unstable nixpkgs && \
-    /home/lainos/.nix-profile/bin/nix-channel --update
+    /home/lainos/.nix-profile/bin/nix-channel --update && \
+    sed -i 's|"\$HOME/.local/bin:\$HOME/bin:"|"\$HOME/.nix-profile/bin:\$HOME/.local/bin:\$HOME/bin:"|' /home/lainos/.bashrc && \
+    sed -i 's|PATH="\$HOME/.local/bin:\$HOME/bin:\$PATH"|PATH="\$HOME/.nix-profile/bin:\$HOME/.local/bin:\$HOME/bin:\$PATH"|' /home/lainos/.bashrc && \
+    sed -i '/nix\.sh/d' /home/lainos/.bash_profile
 USER root
 
 ENV PATH="/home/lainos/.nix-profile/bin:/home/lainos/.local/bin:${PATH}"

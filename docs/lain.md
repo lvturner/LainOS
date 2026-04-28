@@ -196,8 +196,8 @@ nix profile install nixpkgs#python3
 # List installed
 nix profile list
 
-# Remove by index
-nix profile remove 0
+# Remove by name
+nix profile remove jq
 
 # Free disk space from old packages
 nix-collect-garbage
