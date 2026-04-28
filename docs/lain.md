@@ -1,6 +1,6 @@
 # lain — LLM Chat CLI
 
-An interactive LLM chat interface with MCP tool support, profile-based configuration, and a terminal UI. Runs inside the lainos container and is the default login shell for the `lainos` user.
+An interactive LLM chat interface with MCP tool support, profile-based configuration, and a terminal UI. Runs inside the lainos container and can be launched with the `lain` command.
 
 ## CLI Usage
 

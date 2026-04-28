@@ -49,12 +49,12 @@ podman logs lainos | head -10
 ssh -p 2222 lainos@localhost
 ```
 
-The `lainos` user's login shell is `lain`, so SSHing in drops you directly into the lain TUI.
+The `lainos` user's login shell is `bash`. After logging in, the `/etc/motd` banner shows how to start `lain`.
 
-To get a regular shell instead:
+To launch lain directly:
 
 ```bash
-ssh -p 2222 lainos@localhost -- /bin/bash
+ssh -p 2222 lainos@localhost -t lain
 ```
 
 ## Systemd Services Inside the Container

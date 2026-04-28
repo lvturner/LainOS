@@ -16,9 +16,22 @@ RUN mkdir -p /var/usrlocal/bin && \
 COPY --from=builder /build/wh-gateway /usr/local/bin/wh-gateway
 COPY --from=lain-builder /build/lain /usr/local/bin/lain
 
-RUN useradd -m -u 1000 -s /usr/local/bin/lain lainos && \
+RUN useradd -m -u 1000 -s /bin/bash lainos && \
     mkdir -p /home/lainos/.config /home/lainos/.local /home/lainos/config /home/lainos/workspace /home/lainos/workspace/logs && \
     chown -R lainos:lainos /home/lainos/.config /home/lainos/.local /home/lainos/config /home/lainos/workspace
+
+RUN printf '%s\n' \
+    '' \
+    '  |          _)        _ \\   ___|' \
+    '  |      _` | | __ \\  |   |\\___ \\' \
+    '  |     (   | | |   | |   |      |' \
+    ' _____|\\__,_|_|_|  _|\\___/ _____/' \
+    '' \
+    '  lain            Start the Lain AI shell' \
+    '  lain --help     Show available options' \
+    '  docs/           /home/lainos/docs/' \
+    '' \
+    > /etc/motd
 
 RUN mkdir -m 0755 /nix && chown lainos:lainos /nix
 

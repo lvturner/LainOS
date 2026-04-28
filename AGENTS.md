@@ -73,7 +73,7 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 - Single container (`lainos`), systemd as PID 1
 - **NEVER** use `docker stop $(docker ps -aq)` — stops everything
 - Use `podman-compose` for lifecycle management
-- User `lainos` created at build time with `/usr/local/bin/lain` as login shell
+- User `lainos` created at build time with `/bin/bash` as login shell; `lain` is started via `/etc/motd` instructions or `shell.sh`
 - Restart individual services inside the container via SSH:
   ```bash
   ssh -p 2222 lainos@localhost

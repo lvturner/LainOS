@@ -32,7 +32,7 @@ podman-compose up -d
 # 3. Get the auto-generated SSH password
 podman logs lainos | head -10
 
-# 4. SSH in (drops into lain TUI)
+# 4. SSH in (bash shell; type 'lain' to start the AI shell)
 ssh -p 2222 lainos@localhost
 ```
 
@@ -59,7 +59,7 @@ See **[docs/wh-gateway.md](docs/wh-gateway.md)** for route configuration, handle
 
 ## Lain CLI
 
-The default login shell for the `lainos` user. Supports interactive TUI mode and one-shot mode (`--prompt`). Each profile configures an LLM connection, MCP servers, and system instructions. Built-in tools include `run_command` for shell execution and `extend_timeout` for long-running operations.
+The `lainos` user's login shell is `bash`. The `lain` command starts the interactive LLM TUI with MCP tool support. Supports interactive TUI mode and one-shot mode (`--prompt`). Each profile configures an LLM connection, MCP servers, and system instructions. Built-in tools include `run_command` for shell execution and `extend_timeout` for long-running operations.
 
 See **[docs/lain.md](docs/lain.md)** for profiles, configuration, MCP servers, context compaction, and usage.
 
@@ -81,7 +81,7 @@ podman logs lainos | head -10
 ssh -p 2222 lainos@localhost
 ```
 
-The `lainos` user's login shell is `/usr/local/bin/lain` — SSH sessions open directly into the lain TUI.
+The `lainos` user's login shell is `bash`. After logging in, you'll see instructions for starting `lain`.
 
 ## Package Management
 
