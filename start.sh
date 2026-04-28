@@ -40,44 +40,19 @@ if [ "$CURRENT_USER" != "lainos" ]; then
     echo -e "  ${YELLOW}LainOS gives AI agents access to a real Linux environment.${RESET}"
     echo -e "  ${YELLOW}Running under a dedicated user isolates potential damage.${RESET}"
     echo ""
-    read -p "  Create a 'lainos' user? [Y/n] " create_user
-    create_user="${create_user:-Y}"
-
-    if [[ "$create_user" =~ ^[Yy]$ ]]; then
-        if ! command -v sudo >/dev/null 2>&1; then
-            echo -e "  ${RED}sudo is required to create the lainos user.${RESET}"
-            exit 1
-        fi
-
-        if id "lainos" >/dev/null 2>&1; then
-            echo -e "  ${DIM}exists${RESET}  user lainos"
-        else
-            sudo useradd -m lainos
-            echo -e "  ${GREEN}created${RESET} user lainos"
-        fi
-
-        if ! sudo test -u /usr/bin/newuidmap; then
-            sudo chmod u+s /usr/bin/newuidmap /usr/bin/newgidmap
-            echo -e "  ${GREEN}set${RESET} newuidmap/newgidmap setuid"
-        fi
-
-        sudo cp -r "$SCRIPT_DIR" /home/lainos/wh-gateway
-        sudo chown -R lainos:lainos /home/lainos/wh-gateway
-        echo -e "  ${GREEN}copied${RESET} project to /home/lainos/wh-gateway"
-        echo ""
-        echo -e "  ${GREEN}Re-launching as lainos...${RESET}"
-        echo ""
-
-        exec sudo su - lainos -c "cd /home/lainos/wh-gateway && ./start.sh"
-    fi
-
+    echo -e "  ${DIM}To run as a dedicated user:${RESET}"
     echo ""
-    echo -e "  ${RED}⚠  The AI agent will run with full access to your user account.${RESET}"
-    echo -e "  ${RED}   Unintended data loss is possible. Are you sure? [y/N]${RESET}"
+    echo -e "    ${CYAN}sudo useradd -m lainos${RESET}"
+    echo -e "    ${CYAN}sudo cp -r $SCRIPT_DIR /home/lainos/wh-gateway${RESET}"
+    echo -e "    ${CYAN}sudo chown -R lainos:lainos /home/lainos/wh-gateway${RESET}"
+    echo -e "    ${CYAN}sudo su - lainos${RESET}"
+    echo -e "    ${CYAN}cd ~/wh-gateway && ./start.sh${RESET}"
+    echo ""
+    echo -e "  ${RED}⚠  Continuing as ${CURRENT_USER} gives the agent full access to your account.${RESET}"
+    echo -e "  ${RED}   Unintended data loss is possible. Continue? [y/N]${RESET}"
     echo ""
     read -p "  " confirm
     if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
-        echo -e "  ${DIM}Aborting. Create the lainos user and try again.${RESET}"
         exit 1
     fi
 fi
