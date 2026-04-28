@@ -194,7 +194,14 @@ HOST_UID=$(id -u)
 sed -i "s/-u [0-9]\+/-u ${HOST_UID}/" Containerfile
 echo -e "  ${GREEN}set${RESET} lainos UID to ${HOST_UID}"
 
-rm -f compose.override.yaml
+HOST_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')
+cat > compose.override.yaml <<EOF
+services:
+  lainos:
+    environment:
+      TZ: "${HOST_TZ}"
+EOF
+echo -e "  ${GREEN}set${RESET} container timezone to ${HOST_TZ}"
 
 echo ""
 echo -e "${BOLD}  ── building & starting ──────────────────────${RESET}"
