@@ -1,12 +1,14 @@
 # LainOS
 
-A self-contained container platform that pairs an HTTP webhook gateway with an LLM-powered chat CLI. Runs as a single privileged systemd container on [ucore-minimal](https://github.com/ublue-os/ucore) (Fedora CoreOS) with Cloudflare tunneling for ingress.
+An AI-native container operating system — a single container that gives an AI agent a real Linux environment with systemd services, webhook routing, and nix package management. Works out of the box with `./start.sh` and minimal config.
 
-**Components:**
+Agent frameworks like [Hermes](https://github.com/nousresearch/hermes-agent) and [OpenClaw](https://github.com/openclaw/openclaw) layer AI tooling on top of an existing system. LainOS takes the opposite approach: it provides a purpose-built, but isolated, environment where the AI agent has full control over a real OS. The built-in webhook gateway lets you create deterministic workflows — scripts that respond to triggers without an LLM in the loop, so repetitive tasks don't burn tokens.
 
-- **[wh-gateway](docs/wh-gateway.md)** — Go HTTP server that routes incoming webhooks to user-defined scripts
-- **[lain](docs/lain.md)** — Interactive LLM chat CLI with MCP tool support, profile-based configuration, and a terminal UI
-- **[cloudflared](docs/cloudflare-tunnel.md)** — Cloudflare tunnel client for external traffic ingress
+**What's included:**
+
+- **[lain](docs/lain.md)** — Interactive LLM CLI with MCP tool support (the agent's interface to the system)
+- **[wh-gateway](docs/wh-gateway.md)** — HTTP webhook gateway for deterministic workflows (no LLM required)
+- **[cloudflared](docs/cloudflare-tunnel.md)** — Cloudflare tunnel for external ingress
 
 ## Quick Start
 
