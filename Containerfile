@@ -65,5 +65,5 @@ COPY scripts/first-boot-setup.sh /usr/local/bin/first-boot-setup.sh
 COPY scripts/init-wrapper.sh /usr/local/bin/init-wrapper.sh
 RUN chmod +x /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh
 
-VOLUME ["/home/lainos/config", "/home/lainos/workspace", "/home/lainos/.local"]
+RUN cp -a /home/lainos /etc/skel-lainos
 CMD ["/usr/local/bin/init-wrapper.sh"]

@@ -44,7 +44,7 @@ Each profile lives at `~/.config/lain/profiles/<name>/` and contains three files
     └── agents.md        # System instructions
 ```
 
-On the host, profiles are at `.data/lain/profiles/<name>/` (bind-mounted into the container).
+On the host, profiles are at `.data/home/.config/lain/profiles/<name>/` (bind-mounted into the container).
 
 ### config.yaml — LLM Connection
 
@@ -210,8 +210,8 @@ Installed binaries are immediately available in PATH.
 To create a new profile (e.g. for a different model):
 
 ```bash
-mkdir -p .data/lain/profiles/codellama
-cat > .data/lain/profiles/codellama/config.yaml << 'EOF'
+mkdir -p .data/home/.config/lain/profiles/codellama
+cat > .data/home/.config/lain/profiles/codellama/config.yaml << 'EOF'
 api_url: "http://localhost:11434/v1"
 api_key: ""
 model: "codellama:34b"
@@ -219,11 +219,11 @@ temperature: 0.2
 max_tokens: 8192
 EOF
 
-cat > .data/lain/profiles/codellama/servers.json << 'EOF'
+cat > .data/home/.config/lain/profiles/codellama/servers.json << 'EOF'
 { "mcpServers": {} }
 EOF
 
-cat > .data/lain/profiles/codellama/agents.md << 'EOF'
+cat > .data/home/.config/lain/profiles/codellama/agents.md << 'EOF'
 You are a coding assistant focused on code review and refactoring.
 EOF
 ```

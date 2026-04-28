@@ -85,11 +85,7 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 
 | Host mount | Container path | Purpose |
 |---|---|---|
-| `./config/` | — | Tracked example templates (not mounted) |
-| `./.data/config/` | `/home/lainos/config/` | `gateway.yaml`, `cloudflared.yaml`, cloudflared credentials |
-| `./.data/workspace/` | `/home/lainos/workspace/` | User scripts executed by webhook routes |
-| `./.data/lain/` | `/home/lainos/.config/lain/` | Lain profile config |
-| `./.data/local/` | `/home/lainos/.local/` | Nix profiles, local binaries |
+| `./.data/home/` | `/home/lainos/` | Entire home directory (config, workspace, dotfiles) |
 | *(named volume)* | `/nix` | Nix store — persists across container rebuilds |
 
 - Config changes to `gateway.yaml` are hot-reloaded (no restart needed)

@@ -90,14 +90,14 @@ echo ""
 echo -e "${BOLD}  ── checking config ──────────────────────────${RESET}"
 echo ""
 
-mkdir -p .data/config .data/workspace .data/local .data/lain/profiles/default
+mkdir -p .data/home/config .data/home/workspace .data/home/.local .data/home/.config/lain/profiles/default
 
-ensure_config config/gateway.example.yaml .data/config/gateway.yaml "gateway.yaml"
-ensure_config config/cloudflared.example.yaml .data/config/cloudflared.yaml "cloudflared.yaml"
+ensure_config config/gateway.example.yaml .data/home/config/gateway.yaml "gateway.yaml"
+ensure_config config/cloudflared.example.yaml .data/home/config/cloudflared.yaml "cloudflared.yaml"
 
-if [ ! -d .data/workspace/examples ]; then
+if [ ! -d .data/home/workspace/examples ]; then
     if [ -d examples ]; then
-        cp -r examples .data/workspace/examples
+        cp -r examples .data/home/workspace/examples
         echo -e "  ${GREEN}created${RESET} workspace examples"
     else
         echo -e "  ${RED}missing${RESET} workspace examples — no examples/ directory found"
@@ -106,13 +106,13 @@ else
     echo -e "  ${DIM}exists${RESET}  workspace examples"
 fi
 
-mkdir -p .data/workspace/logs .data/workspace/scripts
+mkdir -p .data/home/workspace/logs .data/home/workspace/scripts
 
 echo ""
 echo -e "${BOLD}  ── lain profile setup ──────────────────────${RESET}"
 echo ""
 
-LAIN_DIR=".data/lain/profiles/default"
+LAIN_DIR=".data/home/.config/lain/profiles/default"
 mkdir -p "$LAIN_DIR"
 
 if [ ! -f "$LAIN_DIR/config.yaml" ]; then

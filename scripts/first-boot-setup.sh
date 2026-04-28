@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+if [ -z "$(ls -A /home/lainos 2>/dev/null)" ]; then
+    cp -a /etc/skel-lainos/. /home/lainos/
+fi
+
 PASSWORD=$(openssl rand -base64 18)
 echo "lainos:$PASSWORD" | chpasswd
 

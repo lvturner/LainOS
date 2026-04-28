@@ -31,11 +31,11 @@ This outputs a tunnel ID and automatically generates a credentials file at `/roo
 ### 4. Copy credentials to the bind-mounted config directory
 
 ```bash
-mkdir -p .data/config/cloudflared
+mkdir -p .data/home/config/cloudflared
 podman exec lainos cp /root/.cloudflared/<tunnel-id>.json /home/lainos/config/cloudflared/credentials.json
 ```
 
-Since `/home/lainos/config` is bind-mounted to `./.data/config/` on the host, this file persists across container restarts.
+Since `/home/lainos` is bind-mounted to `./.data/home/` on the host, this file persists across container restarts.
 
 ### 5. Configure DNS
 
