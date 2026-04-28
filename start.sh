@@ -209,8 +209,9 @@ echo ""
 echo -e "${BOLD}  ── waiting for container ────────────────────${RESET}"
 echo ""
 
-for i in $(seq 1 10); do
-    if podman exec lainos systemctl is-system-running >/dev/null 2>&1; then
+for i in $(seq 1 30); do
+    STATE=$(podman exec lainos systemctl is-system-running 2>/dev/null || true)
+    if [[ "$STATE" == "running" || "$STATE" == "degraded" ]]; then
         break
     fi
     sleep 1

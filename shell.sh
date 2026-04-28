@@ -4,7 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-if ! podman exec lainos systemctl is-system-running >/dev/null 2>&1; then
+STATE=$(podman exec lainos systemctl is-system-running 2>/dev/null || true)
+if [[ "$STATE" != "running" && "$STATE" != "degraded" ]]; then
     echo "Container is not running. Start it first with ./start.sh"
     exit 1
 fi
