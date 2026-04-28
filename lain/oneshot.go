@@ -8,7 +8,7 @@ import (
 
 func RunOneShot(profile *Profile, registry *ToolRegistry, prompt string) error {
 	tools := registry.AllTools()
-	client := NewLLMClient(profile.Config, profile.Agents, tools, registry)
+	client := NewLLMClient(profile.Config, profile.Agents, profile.AgentsPath, tools, registry)
 	ch := client.Chat(context.Background(), prompt)
 	for event := range ch {
 		switch event.Type {

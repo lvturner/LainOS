@@ -87,7 +87,7 @@ func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model 
 	ta.ShowLineNumbers = false
 	ta.Focus()
 
-	llmClient := NewLLMClient(profile.Config, profile.Agents, registry.AllTools(), registry)
+	llmClient := NewLLMClient(profile.Config, profile.Agents, profile.AgentsPath, registry.AllTools(), registry)
 	session := NewSession(profileName)
 
 	dir, _ := SessionDir(profileName)
@@ -271,7 +271,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		m.currentSession = NewSession(m.profileName)
 		m.messages = nil
 		m.current = nil
-		m.llmClient = NewLLMClient(m.profile.Config, m.profile.Agents, m.registry.AllTools(), m.registry)
+		m.llmClient = NewLLMClient(m.profile.Config, m.profile.Agents, m.profile.AgentsPath, m.registry.AllTools(), m.registry)
 		m.titleGenPending = true
 		m.setupTodoStore()
 		m.statusMsg = "New session started"
@@ -324,7 +324,7 @@ func (m model) handleSessionPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.currentSession = &selected
 			m.messages = messages
-			m.llmClient = NewLLMClient(m.profile.Config, m.profile.Agents, m.registry.AllTools(), m.registry)
+			m.llmClient = NewLLMClient(m.profile.Config, m.profile.Agents, m.profile.AgentsPath, m.registry.AllTools(), m.registry)
 			m.llmClient.SetHistory(BuildHistoryFromMessages(messages))
 			m.titleGenPending = false
 			m.setupTodoStore()

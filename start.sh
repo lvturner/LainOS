@@ -30,6 +30,27 @@ ensure_config() {
     fi
 }
 
+sync_config() {
+    local src="$1"
+    local dest="$2"
+    local name="$3"
+
+    if [ ! -f "$dest" ]; then
+        if [ -f "$src" ]; then
+            cp "$src" "$dest"
+            echo -e "  ${GREEN}created${RESET} $name from example"
+        else
+            echo -e "  ${RED}missing${RESET} $name — no example file found"
+            return 1
+        fi
+    elif [ -f "$src" ] && ! diff -q "$src" "$dest" >/dev/null 2>&1; then
+        cp "$src" "$dest"
+        echo -e "  ${GREEN}updated${RESET} $name (source changed)"
+    else
+        echo -e "  ${DIM}exists${RESET}  $name"
+    fi
+}
+
 echo ""
 echo -e "${BOLD}  ── security check ──────────────────────────${RESET}"
 echo ""
@@ -121,7 +142,7 @@ else
     echo -e "  ${DIM}exists${RESET}  lain default profile config"
 fi
 
-ensure_config config/agents.example.md "$LAIN_DIR/agents.md" "lain agents.md"
+sync_config config/agents.example.md "$LAIN_DIR/agents.md" "lain agents.md"
 
 if [ ! -f "$LAIN_DIR/servers.json" ]; then
     echo '{"mcpServers":{}}' > "$LAIN_DIR/servers.json"

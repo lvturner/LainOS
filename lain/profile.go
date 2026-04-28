@@ -7,10 +7,11 @@ import (
 )
 
 type Profile struct {
-	Config   *LainConfig
-	Servers  *ServersConfig
-	Agents   string
-	BasePath string
+	Config     *LainConfig
+	Servers    *ServersConfig
+	Agents     string
+	AgentsPath string
+	BasePath   string
 }
 
 func ProfileDir(name string) (string, error) {
@@ -46,9 +47,10 @@ func LoadProfile(name string) (*Profile, error) {
 	}
 
 	return &Profile{
-		Config:   cfg,
-		Servers:  servers,
-		Agents:   agents,
-		BasePath: dir,
+		Config:     cfg,
+		Servers:    servers,
+		Agents:     agents,
+		AgentsPath: agentsPath,
+		BasePath:   dir,
 	}, nil
 }

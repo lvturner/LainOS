@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -23,6 +25,7 @@ type LLMClient struct {
 	client              *openai.Client
 	model               string
 	systemMsg           string
+	agentsPath          string
 	temperature         float64
 	maxTokens           int
 	history             []openai.ChatCompletionMessage
@@ -37,13 +40,14 @@ type LLMClient struct {
 	injectCh            chan string
 }
 
-func NewLLMClient(cfg *LainConfig, systemPrompt string, tools []openai.Tool, registry *ToolRegistry) *LLMClient {
+func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools []openai.Tool, registry *ToolRegistry) *LLMClient {
 	config := openai.DefaultConfig(cfg.APIKey)
 	config.BaseURL = cfg.APIURL
 	return &LLMClient{
 		client:              openai.NewClientWithConfig(config),
 		model:               cfg.Model,
 		systemMsg:           systemPrompt,
+		agentsPath:          agentsPath,
 		temperature:         cfg.Temperature,
 		maxTokens:           cfg.MaxTokens,
 		tools:               tools,
@@ -63,9 +67,28 @@ func (c *LLMClient) InjectMessage(msg string) {
 	}
 }
 
+func (c *LLMClient) reloadAgents() {
+	if c.agentsPath == "" {
+		return
+	}
+	data, err := os.ReadFile(c.agentsPath)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			slog.Warn("failed to reload agents", "path", c.agentsPath, "error", err)
+		}
+		return
+	}
+	updated := string(data)
+	if updated != c.systemMsg {
+		c.systemMsg = updated
+		slog.Info("agents.md reloaded", "path", c.agentsPath)
+	}
+}
+
 func (c *LLMClient) Chat(ctx context.Context, userMsg string) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 100)
 	c.injectCh = make(chan string, 20)
+	c.reloadAgents()
 	c.history = append(c.history, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
 		Content: userMsg,
