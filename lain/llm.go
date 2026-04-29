@@ -63,6 +63,24 @@ func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools
 	}
 }
 
+func (c *LLMClient) CompactNow(ctx context.Context) error {
+	ch := make(chan StreamEvent, 10)
+	c.compact(ctx, ch)
+	close(ch)
+	for evt := range ch {
+		if evt.Type == "compaction_failed" {
+			return fmt.Errorf("%s", evt.Content)
+		}
+	}
+	return nil
+}
+
+func (c *LLMClient) CompactionInfo() (estimated, threshold int) {
+	estimated = estimateTokens(c.history)
+	threshold = int(float64(c.contextWindow) * float64(c.compactionThreshold) / 100.0)
+	return
+}
+
 func (c *LLMClient) InjectMessage(msg string) {
 	if c.injectCh != nil {
 		select {
@@ -438,6 +456,10 @@ outer:
 				}
 			}
 		doneDrain:
+
+			if c.needsCompaction() {
+				c.compact(ctx, ch)
+			}
 
 			continue outer
 		}

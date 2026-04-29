@@ -181,7 +181,26 @@ When the conversation history approaches the context window limit, lain automati
 4. Replaces old history with the summary, keeping the last user message (if `compaction_strategy` is `keep_last`)
 5. Compaction events are shown in the TUI and in stderr for one-shot mode
 
+Auto-compaction runs:
+- Before each user message is processed
+- After each tool call batch within the agentic loop (preventing runaway context growth during long sessions)
+
 Compaction preserves factual information, decisions, actions taken, code snippets, and the current task state.
+
+### Manual Compaction
+
+Type `/compact` to manually trigger compaction at any time. This is useful when you want to reclaim context space before the automatic threshold is reached.
+
+## Slash Commands
+
+| Command | Description |
+|---|---|
+| `/new` | Start a new session |
+| `/save` | Save current session |
+| `/rename <title>` | Rename current session |
+| `/sessions` | Open session picker |
+| `/compact` | Manually trigger context compaction |
+| `/quit` or `/exit` | Exit lain |
 
 ## Nix Package Management
 

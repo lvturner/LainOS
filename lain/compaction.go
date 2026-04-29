@@ -22,21 +22,31 @@ Write the summary so that another AI assistant can seamlessly continue the conve
 
 const charsPerToken = 4
 
+const tokenSafetyMultiplier = 1.2
+
 func estimateTokens(messages []openai.ChatCompletionMessage) int {
 	total := 0
 	for _, msg := range messages {
 		total += len(msg.Content) / charsPerToken
-		total += 4
+		total += 8
+		total += len(msg.Role) / charsPerToken
+		if msg.Name != "" {
+			total += len(msg.Name) / charsPerToken
+			total += 2
+		}
 		for _, tc := range msg.ToolCalls {
+			total += len(tc.ID) / charsPerToken
+			total += len(tc.Type) / charsPerToken
 			total += len(tc.Function.Name) / charsPerToken
 			total += len(tc.Function.Arguments) / charsPerToken
-			total += 4
+			total += 6
 		}
-		if msg.Role == openai.ChatMessageRoleTool {
-			total += len(msg.Content) / charsPerToken
+		if msg.ToolCallID != "" {
+			total += len(msg.ToolCallID) / charsPerToken
+			total += 2
 		}
 	}
-	return total
+	return int(float64(total) * tokenSafetyMultiplier)
 }
 
 func (c *LLMClient) needsCompaction() bool {

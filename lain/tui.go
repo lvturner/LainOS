@@ -85,7 +85,7 @@ type model struct {
 
 func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your message... (/new /sessions /save /rename)"
+	ta.Placeholder = "Type your message... (/new /sessions /save /rename /compact)"
 	ta.Prompt = "> "
 	ta.CharLimit = 0
 	ta.SetHeight(1)
@@ -382,6 +382,22 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	case "/sessions":
 		m.openSessionPicker()
 		return m, nil
+	case "/compact":
+		estimated, threshold := m.llmClient.CompactionInfo()
+		if len(m.messages) == 0 {
+			m.statusMsg = "Nothing to compact (empty session)"
+			m.refreshView()
+			return m, m.clearStatus()
+		}
+		ctx := context.Background()
+		if err := m.llmClient.CompactNow(ctx); err != nil {
+			m.statusMsg = fmt.Sprintf("Compaction failed: %s", err)
+		} else {
+			estimated, threshold = m.llmClient.CompactionInfo()
+			m.statusMsg = fmt.Sprintf("Context compacted (~%d/%d tokens)", estimated, threshold)
+		}
+		m.refreshView()
+		return m, m.clearStatus()
 	default:
 		m.statusMsg = "Unknown command: " + cmd
 		m.refreshView()
