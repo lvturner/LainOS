@@ -65,7 +65,11 @@ func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools
 
 func (c *LLMClient) InjectMessage(msg string) {
 	if c.injectCh != nil {
-		c.injectCh <- msg
+		select {
+		case c.injectCh <- msg:
+		default:
+			slog.Warn("inject channel full, dropping message")
+		}
 	}
 }
 

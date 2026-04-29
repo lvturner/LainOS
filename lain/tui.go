@@ -29,8 +29,8 @@ type ChatMessage struct {
 	rendered string
 }
 
-type streamEventMsg struct {
-	event StreamEvent
+type streamBatchMsg struct {
+	events []StreamEvent
 }
 
 type titleGeneratedMsg struct {
@@ -152,8 +152,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		return m.handleWindowSize(msg)
-	case streamEventMsg:
-		return m.handleStreamEvent(msg.event)
+	case streamBatchMsg:
+		return m.handleStreamBatch(msg.events)
 	case titleGeneratedMsg:
 		return m.handleTitleGenerated(msg)
 	case statusClearMsg:
@@ -637,7 +637,7 @@ func (m *model) finalizeLastContent() {
 	}
 }
 
-func (m *model) handleStreamEvent(event StreamEvent) (tea.Model, tea.Cmd) {
+func (m model) handleStreamEvent(event StreamEvent) (model, tea.Cmd) {
 	switch event.Type {
 	case "token":
 		if m.current != nil {
@@ -710,7 +710,6 @@ func (m *model) handleStreamEvent(event StreamEvent) (tea.Model, tea.Cmd) {
 		m.cancelFn = nil
 		m.messageQueue = nil
 		m.autoSave()
-		m.refreshView()
 		if m.titleGenPending {
 			m.titleGenPending = false
 			return m, m.generateTitleCmd()
@@ -731,7 +730,6 @@ func (m *model) handleStreamEvent(event StreamEvent) (tea.Model, tea.Cmd) {
 		m.cancelFn = nil
 		m.messageQueue = nil
 		m.autoSave()
-		m.refreshView()
 		return m, nil
 	case "cancelled":
 		if m.current != nil {
@@ -748,22 +746,30 @@ func (m *model) handleStreamEvent(event StreamEvent) (tea.Model, tea.Cmd) {
 		m.cancelFn = nil
 		m.messageQueue = nil
 		m.autoSave()
-		m.refreshView()
 		return m, nil
 	case "injected":
 		if len(m.messageQueue) > 0 {
 			m.messageQueue = m.messageQueue[1:]
 		}
-		m.refreshView()
-		return m, waitForStreamEvent(m.streamCh)
 	case "ask_question":
 		if event.Question != nil && event.ResponseCh != nil {
 			m.question = &QuestionState{}
 			*m.question = NewQuestionState(*event.Question, event.ResponseCh)
 			m.question.CustomInput.SetWidth(m.width)
 			m.resizeViewport(m.viewportHeightQuestion())
-			m.refreshView()
 			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m model) handleStreamBatch(events []StreamEvent) (tea.Model, tea.Cmd) {
+	for _, event := range events {
+		var cmd tea.Cmd
+		m, cmd = m.handleStreamEvent(event)
+		if !m.streaming || m.question != nil {
+			m.refreshView()
+			return m, cmd
 		}
 	}
 	m.refreshView()
@@ -955,10 +961,25 @@ func formatQueuedMessage(msg ChatMessage, width int) string {
 
 func waitForStreamEvent(ch <-chan StreamEvent) tea.Cmd {
 	return func() tea.Msg {
+		var events []StreamEvent
 		e, ok := <-ch
 		if !ok {
-			return streamEventMsg{StreamEvent{Type: "done"}}
+			return streamBatchMsg{events: []StreamEvent{{Type: "done"}}}
 		}
-		return streamEventMsg{e}
+		events = append(events, e)
+		for {
+			select {
+			case e, ok := <-ch:
+				if !ok {
+					return streamBatchMsg{events: append(events, StreamEvent{Type: "done"})}
+				}
+				events = append(events, e)
+				if e.Type == "done" || e.Type == "error" || e.Type == "cancelled" || e.Type == "ask_question" {
+					return streamBatchMsg{events: events}
+				}
+			default:
+				return streamBatchMsg{events: events}
+			}
+		}
 	}
 }
