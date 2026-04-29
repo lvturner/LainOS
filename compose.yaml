@@ -7,7 +7,7 @@ services:
     command: /usr/local/bin/init-wrapper.sh
     stop_signal: SIGRTMIN+3
     volumes:
-      - ./.data/home:/home/lainos:Z
+      - ./.data/home:/home/lainos
       - nix:/nix
     restart: unless-stopped
 

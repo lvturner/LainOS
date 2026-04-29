@@ -12,6 +12,8 @@ RESET='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+source "$SCRIPT_DIR/scripts/common.sh"
+
 ensure_config() {
     local src="$1"
     local dest="$2"
@@ -85,7 +87,17 @@ echo -e "${CYAN}   |     (   | | |   | |   |      | "
 echo -e "${CYAN}_____|\\__,_|_|_|  _|\\___/ _____/  "
 echo -e "${CYAN}                                   ${RESET}"
 echo ""
-echo -e "  ${BOLD}LainOS${RESET} ${DIM}• ucore + podman${RESET}"
+
+echo -e "${BOLD}  ── checking dependencies ──────────────────${RESET}"
+echo ""
+
+if ! detect_runtime; then
+    exit 1
+fi
+print_runtime
+
+echo ""
+echo -e "  ${BOLD}LainOS${RESET} ${DIM}• ucore + ${RUNTIME}${RESET}"
 echo ""
 echo -e "${BOLD}  ── checking config ──────────────────────────${RESET}"
 echo ""
@@ -160,11 +172,17 @@ sed -i "s/-u [0-9]\+/-u ${HOST_UID}/" Containerfile
 echo -e "  ${GREEN}set${RESET} lainos UID to ${HOST_UID}"
 
 HOST_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')
+
+VOLUME_OPTS=""
+if [[ "$RUNTIME" == "podman" ]]; then
+    VOLUME_OPTS=$'\n'"      - type: bind"$'\n'"        source: ./.data/home"$'\n'"        target: /home/lainos"$'\n'"        selinux: Z"
+fi
+
 cat > compose.override.yaml <<EOF
 services:
   lainos:
     environment:
-      TZ: "${HOST_TZ}"
+      TZ: "${HOST_TZ}"${VOLUME_OPTS}
 EOF
 echo -e "  ${GREEN}set${RESET} container timezone to ${HOST_TZ}"
 
@@ -172,8 +190,8 @@ echo ""
 echo -e "${BOLD}  ── building & starting ──────────────────────${RESET}"
 echo ""
 
-podman-compose down 2>/dev/null || true
-podman-compose up -d --build --force-recreate 2>&1 | while IFS= read -r line; do
+$COMPOSE_CMD down 2>/dev/null || true
+$COMPOSE_CMD up -d --build --force-recreate 2>&1 | while IFS= read -r line; do
     echo -e "  $line"
 done
 
@@ -182,7 +200,7 @@ echo -e "${BOLD}  ── waiting for container ───────────
 echo ""
 
 for i in $(seq 1 90); do
-    STATE=$(podman exec lainos systemctl is-system-running 2>/dev/null || true)
+    STATE=$($RUNTIME exec lainos systemctl is-system-running 2>/dev/null || true)
     if [[ "$STATE" == "running" || "$STATE" == "degraded" ]]; then
         break
     fi
@@ -193,13 +211,13 @@ echo ""
 
 if [[ "$STATE" != "running" && "$STATE" != "degraded" ]]; then
     echo -e "  ${RED}Container did not start within 90s (state: ${STATE})${RESET}"
-    echo -e "  ${DIM}Check logs: podman logs lainos${RESET}"
+    echo -e "  ${DIM}Check logs: ${RUNTIME} logs lainos${RESET}"
     exit 1
 fi
 
 if [[ "$STATE" == "degraded" ]]; then
     echo -e "  ${YELLOW}System is degraded — some services failed:${RESET}"
-    podman exec lainos systemctl --failed --no-legend 2>/dev/null | while IFS= read -r line; do
+    $RUNTIME exec lainos systemctl --failed --no-legend 2>/dev/null | while IFS= read -r line; do
         echo -e "    ${RED}${line}${RESET}"
     done
     echo ""
@@ -208,16 +226,16 @@ else
     echo ""
 fi
 
-if ! podman exec lainos test -f /var/lib/lainos/.password 2>/dev/null; then
-    podman exec lainos systemctl start first-boot-setup.service 2>/dev/null || true
+if ! $RUNTIME exec lainos test -f /var/lib/lainos/.password 2>/dev/null; then
+    $RUNTIME exec lainos systemctl start first-boot-setup.service 2>/dev/null || true
     sleep 2
 fi
 
-PASSWORD=$(podman exec lainos cat /var/lib/lainos/.password 2>/dev/null || true)
+PASSWORD=$($RUNTIME exec lainos cat /var/lib/lainos/.password 2>/dev/null || true)
 
 if [ -z "$PASSWORD" ]; then
     echo -e "  ${RED}Could not retrieve password.${RESET}"
-    echo -e "  ${DIM}Try: podman exec lainos cat /var/lib/lainos/.password${RESET}"
+    echo -e "  ${DIM}Try: ${RUNTIME} exec lainos cat /var/lib/lainos/.password${RESET}"
     PASSWORD="(unavailable)"
 fi
 
@@ -232,18 +250,18 @@ echo -e "  Password: ${YELLOW}${PASSWORD}${RESET}"
 echo ""
 
 echo ""
-echo -e "  ${DIM}Logs:${RESET}  podman logs -f lainos"
-echo -e "  ${DIM}Stop:${RESET}   podman-compose down"
+echo -e "  ${DIM}Logs:${RESET}  ${RUNTIME} logs -f lainos"
+echo -e "  ${DIM}Stop:${RESET}   ${COMPOSE_CMD} down"
 echo ""
 echo -e "${GREEN}  Opening LainOS shell...${RESET}"
 echo ""
 
-podman exec -it -u lainos -w /home/lainos lainos /usr/local/bin/lain
+$RUNTIME exec -it -u lainos -w /home/lainos lainos /usr/local/bin/lain
 
 echo ""
 echo -e "${GREEN}  LainOS is still running in the background.${RESET}"
 echo ""
 echo -e "  ${DIM}Shell:${RESET}   ./shell.sh"
-echo -e "  ${DIM}Logs:${RESET}    podman logs -f lainos"
-echo -e "  ${DIM}Stop:${RESET}    podman-compose down"
+echo -e "  ${DIM}Logs:${RESET}    ${RUNTIME} logs -f lainos"
+echo -e "  ${DIM}Stop:${RESET}    ${COMPOSE_CMD} down"
 echo ""

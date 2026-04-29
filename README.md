@@ -13,11 +13,29 @@ Agent frameworks like [Hermes](https://github.com/nousresearch/hermes-agent) and
 ## Quick Start
 
 ```bash
-# Build and start (prompts for lain profile on first run)
-./start.sh
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/lvturner/LainOS/main/install.sh)"
 ```
 
-`start.sh` handles everything: copying example configs, setting up the lain profile, building the container, and displaying credentials. It drops you into a lain shell when done. When you exit the shell, the container keeps running in the background. Re-attach with `./shell.sh`.
+The installer checks for dependencies (offers to install them), clones the repo, and launches `start.sh`. Supports macOS, Fedora/RHEL, and Ubuntu/Debian. Uses **podman** (preferred) or **docker** as a fallback.
+
+Or clone and run manually:
+
+```bash
+git clone https://github.com/lvturner/LainOS.git
+cd LainOS && ./start.sh
+```
+
+`start.sh` handles everything: checking dependencies, copying example configs, setting up the lain profile, building the container, and displaying credentials. It drops you into a lain shell when done. When you exit the shell, the container keeps running in the background. Re-attach with `./shell.sh`.
+
+### Prerequisites
+
+LainOS requires a container runtime. `start.sh` will detect what's available and offer install instructions if nothing is found.
+
+| OS | podman (recommended) | docker (fallback) |
+|---|---|---|
+| macOS | `brew install podman podman-compose` then `podman machine init` | `brew install --cask docker` |
+| Fedora/RHEL | `sudo dnf install podman podman-compose` | `sudo dnf install docker docker-compose-plugin` |
+| Ubuntu/Debian | `sudo apt install podman podman-compose` | `sudo apt install docker.io docker-compose-plugin` |
 
 Manual alternative:
 
@@ -28,6 +46,7 @@ cp config/cloudflared.example.yaml config/cloudflared.yaml
 
 # 2. Build and run
 podman-compose up -d
+# or: docker compose up -d
 
 # 3. Get the auto-generated SSH password
 podman logs lainos | head -10
@@ -39,6 +58,7 @@ ssh -p 2222 lainos@localhost
 ## Project Structure
 
 ```
+install.sh        → One-shot curl-able installer
 config/           → gateway.yaml, cloudflared.yaml, lain profiles (bind-mounted)
 workspace/        → Handler scripts (bind-mounted)
 local/            → ~/.local for the lainos user (bind-mounted)
@@ -46,9 +66,9 @@ docs/             → Documentation (COPY'd into container at /home/lainos/docs/
 gateway/          → Go webhook gateway source
 lain/             → Go lain CLI source
 systemd/          → Container systemd unit files
-scripts/          → First-boot setup, init wrapper
+scripts/          → First-boot setup, init wrapper, shared detection functions
 Containerfile     → Multi-stage container build
-compose.yaml      → podman-compose definition
+compose.yaml      → Compose definition (podman or docker)
 ```
 
 ## Webhook Gateway
@@ -75,6 +95,7 @@ The container generates a random password on first boot:
 
 ```bash
 podman logs lainos | head -10
+# or: docker logs lainos | head -10
 ```
 
 ```bash
@@ -106,5 +127,7 @@ podman-compose up -d --build    # Rebuild after code changes
 podman logs -f lainos           # View logs
 podman-compose down             # Stop
 ```
+
+All commands work with `docker compose` as a drop-in replacement if you don't have podman installed.
 
 See **[docs/container-management.md](docs/container-management.md)** for systemd service management, volume mounts, and container lifecycle.
