@@ -20,6 +20,7 @@ type LainConfig struct {
 	IdleTimeout         time.Duration `yaml:"idle_timeout"`
 	MaxNudges           int           `yaml:"max_nudges"`
 	NudgeMessage        string        `yaml:"nudge_message"`
+	NoStream            bool          `yaml:"no_stream"`
 }
 
 type ServersConfig struct {

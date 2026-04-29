@@ -37,6 +37,7 @@ type LLMClient struct {
 	idleTimeout         time.Duration
 	maxNudges           int
 	nudgeMessage        string
+	noStream            bool
 	injectCh            chan string
 }
 
@@ -58,6 +59,7 @@ func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools
 		idleTimeout:         cfg.IdleTimeout,
 		maxNudges:           cfg.MaxNudges,
 		nudgeMessage:        cfg.NudgeMessage,
+		noStream:            cfg.NoStream,
 	}
 }
 
@@ -118,116 +120,48 @@ outer:
 			Tools:       c.tools,
 			Temperature: float32(c.temperature),
 			MaxTokens:   c.maxTokens,
-			Stream:      true,
-		}
-
-		type connResult struct {
-			stream *openai.ChatCompletionStream
-			err    error
-		}
-		connCh := make(chan connResult, 1)
-		go func() {
-			s, e := c.client.CreateChatCompletionStream(ctx, req)
-			connCh <- connResult{s, e}
-		}()
-
-		connTimer := time.NewTimer(effectiveTimeout)
-		var stream *openai.ChatCompletionStream
-		select {
-		case r := <-connCh:
-			connTimer.Stop()
-			if r.err != nil {
-				ch <- StreamEvent{Type: "error", Content: r.err.Error()}
-				return
-			}
-			stream = r.stream
-		case <-connTimer.C:
-			nudgeCount++
-			if nudgeCount > c.maxNudges {
-				ch <- StreamEvent{Type: "error", Content: "Agent stalled: max nudges exceeded during connection"}
-				return
-			}
-			ch <- StreamEvent{Type: "nudge", Content: fmt.Sprintf("Agent stalled, nudging... (attempt %d/%d)", nudgeCount, c.maxNudges)}
-			c.history = append(c.history, openai.ChatCompletionMessage{
-				Role:    openai.ChatMessageRoleUser,
-				Content: c.nudgeMessage,
-			})
-			continue outer
-		case <-ctx.Done():
-			ch <- StreamEvent{Type: "cancelled"}
-			return
+			Stream:      !c.noStream,
 		}
 
 		var content strings.Builder
 		toolCalls := make(map[int]*openai.ToolCall)
 		var finishReason openai.FinishReason
-		streamTimer := time.NewTimer(effectiveTimeout)
 
-	recvLoop:
-		for {
-			type recvResult struct {
-				resp openai.ChatCompletionStreamResponse
+		if c.noStream {
+			type nonStreamResult struct {
+				resp openai.ChatCompletionResponse
 				err  error
 			}
-			rc := make(chan recvResult, 1)
+			nsc := make(chan nonStreamResult, 1)
 			go func() {
-				resp, err := stream.Recv()
-				rc <- recvResult{resp, err}
+				r, e := c.client.CreateChatCompletion(ctx, req)
+				nsc <- nonStreamResult{r, e}
 			}()
 
+			timer := time.NewTimer(effectiveTimeout)
 			select {
-			case r := <-rc:
-				if r.err == io.EOF {
-					break recvLoop
-				}
+			case r := <-nsc:
+				timer.Stop()
 				if r.err != nil {
 					ch <- StreamEvent{Type: "error", Content: r.err.Error()}
-					stream.Close()
-					streamTimer.Stop()
 					return
 				}
-				if len(r.resp.Choices) == 0 {
-					continue
-				}
-				choice := r.resp.Choices[0]
-				delta := choice.Delta
-				gotContent := false
-				if delta.Content != "" {
-					content.WriteString(delta.Content)
-					ch <- StreamEvent{Type: "token", Content: delta.Content}
-					gotContent = true
-				}
-				for _, tc := range delta.ToolCalls {
-					if tc.Index == nil {
-						continue
+				if len(r.resp.Choices) > 0 {
+					choice := r.resp.Choices[0]
+					if choice.Message.Content != "" {
+						content.WriteString(choice.Message.Content)
+						ch <- StreamEvent{Type: "token", Content: content.String()}
 					}
-					idx := *tc.Index
-					if existing, ok := toolCalls[idx]; ok {
-						existing.Function.Arguments += tc.Function.Arguments
-					} else {
-						toolCalls[idx] = &openai.ToolCall{
-							ID:   tc.ID,
-							Type: tc.Type,
-							Function: openai.FunctionCall{
-								Name:      tc.Function.Name,
-								Arguments: tc.Function.Arguments,
-							},
-						}
-					}
-					gotContent = true
-				}
-				if choice.FinishReason != "" {
 					finishReason = choice.FinishReason
-					gotContent = true
+					for i, tc := range choice.Message.ToolCalls {
+						tcCopy := tc
+						toolCalls[i] = &tcCopy
+					}
 				}
-				if gotContent {
-					streamTimer.Reset(effectiveTimeout)
-				}
-			case <-streamTimer.C:
-				stream.Close()
+			case <-timer.C:
 				nudgeCount++
 				if nudgeCount > c.maxNudges {
-					ch <- StreamEvent{Type: "error", Content: "Agent stalled: max nudges exceeded during stream"}
+					ch <- StreamEvent{Type: "error", Content: "Agent stalled: max nudges exceeded"}
 					return
 				}
 				ch <- StreamEvent{Type: "nudge", Content: fmt.Sprintf("Agent stalled, nudging... (attempt %d/%d)", nudgeCount, c.maxNudges)}
@@ -237,13 +171,132 @@ outer:
 				})
 				continue outer
 			case <-ctx.Done():
-				stream.Close()
 				ch <- StreamEvent{Type: "cancelled"}
 				return
 			}
+		} else {
+			type connResult struct {
+				stream *openai.ChatCompletionStream
+				err    error
+			}
+			connCh := make(chan connResult, 1)
+			go func() {
+				s, e := c.client.CreateChatCompletionStream(ctx, req)
+				connCh <- connResult{s, e}
+			}()
+
+			connTimer := time.NewTimer(effectiveTimeout)
+			var stream *openai.ChatCompletionStream
+			select {
+			case r := <-connCh:
+				connTimer.Stop()
+				if r.err != nil {
+					ch <- StreamEvent{Type: "error", Content: r.err.Error()}
+					return
+				}
+				stream = r.stream
+			case <-connTimer.C:
+				nudgeCount++
+				if nudgeCount > c.maxNudges {
+					ch <- StreamEvent{Type: "error", Content: "Agent stalled: max nudges exceeded during connection"}
+					return
+				}
+				ch <- StreamEvent{Type: "nudge", Content: fmt.Sprintf("Agent stalled, nudging... (attempt %d/%d)", nudgeCount, c.maxNudges)}
+				c.history = append(c.history, openai.ChatCompletionMessage{
+					Role:    openai.ChatMessageRoleUser,
+					Content: c.nudgeMessage,
+				})
+				continue outer
+			case <-ctx.Done():
+				ch <- StreamEvent{Type: "cancelled"}
+				return
+			}
+
+			streamTimer := time.NewTimer(effectiveTimeout)
+
+		recvLoop:
+			for {
+				type recvResult struct {
+					resp openai.ChatCompletionStreamResponse
+					err  error
+				}
+				rc := make(chan recvResult, 1)
+				go func() {
+					resp, err := stream.Recv()
+					rc <- recvResult{resp, err}
+				}()
+
+				select {
+				case r := <-rc:
+					if r.err == io.EOF {
+						break recvLoop
+					}
+					if r.err != nil {
+						ch <- StreamEvent{Type: "error", Content: r.err.Error()}
+						stream.Close()
+						streamTimer.Stop()
+						return
+					}
+					if len(r.resp.Choices) == 0 {
+						continue
+					}
+					choice := r.resp.Choices[0]
+					delta := choice.Delta
+					gotContent := false
+					if delta.Content != "" {
+						slog.Debug("stream token", "len", len(delta.Content), "content", delta.Content)
+						content.WriteString(delta.Content)
+						ch <- StreamEvent{Type: "token", Content: delta.Content}
+						gotContent = true
+					}
+					for _, tc := range delta.ToolCalls {
+						if tc.Index == nil {
+							continue
+						}
+						idx := *tc.Index
+						if existing, ok := toolCalls[idx]; ok {
+							existing.Function.Arguments += tc.Function.Arguments
+						} else {
+							toolCalls[idx] = &openai.ToolCall{
+								ID:   tc.ID,
+								Type: tc.Type,
+								Function: openai.FunctionCall{
+									Name:      tc.Function.Name,
+									Arguments: tc.Function.Arguments,
+								},
+							}
+						}
+						gotContent = true
+					}
+					if choice.FinishReason != "" {
+						finishReason = choice.FinishReason
+						gotContent = true
+					}
+					if gotContent {
+						streamTimer.Reset(effectiveTimeout)
+					}
+				case <-streamTimer.C:
+					stream.Close()
+					nudgeCount++
+					if nudgeCount > c.maxNudges {
+						ch <- StreamEvent{Type: "error", Content: "Agent stalled: max nudges exceeded during stream"}
+						return
+					}
+					ch <- StreamEvent{Type: "nudge", Content: fmt.Sprintf("Agent stalled, nudging... (attempt %d/%d)", nudgeCount, c.maxNudges)}
+					c.history = append(c.history, openai.ChatCompletionMessage{
+						Role:    openai.ChatMessageRoleUser,
+						Content: c.nudgeMessage,
+					})
+					continue outer
+				case <-ctx.Done():
+					stream.Close()
+					ch <- StreamEvent{Type: "cancelled"}
+					return
+				}
+			}
+			streamTimer.Stop()
+			stream.Close()
 		}
-		streamTimer.Stop()
-		stream.Close()
 
 		select {
 		case <-ctx.Done():

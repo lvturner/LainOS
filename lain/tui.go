@@ -48,6 +48,7 @@ var (
 	compactionStyle    = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("214"))
 	questionModalStyle = lipgloss.NewStyle().Padding(0, 1)
 	statusStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	scrollIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Faint(true)
 	todoHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	todoPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 	todoDoneStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("60")).Faint(true)
@@ -78,6 +79,8 @@ type model struct {
 	statusMsg      string
 	cancelFn       context.CancelFunc
 	messageQueue   []ChatMessage
+	atBottom       bool
+	newBelow       bool
 }
 
 func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model {
@@ -170,17 +173,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	m.atBottom = m.viewport.AtBottom()
+	if m.atBottom {
+		m.newBelow = false
+	}
 	return m, cmd
 }
 
 func (m model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
+	wasAtBottom := m.viewport.AtBottom()
 	for i := range m.messages {
 		m.messages[i].rendered = ""
 	}
 	m.viewport = viewport.New(m.chatWidth(), m.viewportHeight())
 	m.viewport.SetContent(m.renderMessages())
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
 	m.textarea.SetWidth(msg.Width)
 	m.ready = true
 	return m, nil
@@ -240,6 +251,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			m.messageQueue = append(m.messageQueue, queued)
 			m.llmClient.InjectMessage(input)
+			m.viewport.GotoBottom()
 			m.refreshView()
 			return m, waitForStreamEvent(m.streamCh)
 		}
@@ -260,11 +272,65 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		})
 		m.streaming = true
 		m.current = &ChatMessage{Role: "assistant"}
+		m.viewport.GotoBottom()
 		m.refreshView()
 		ctx, cancel := context.WithCancel(context.Background())
 		m.cancelFn = cancel
 		m.streamCh = m.llmClient.Chat(ctx, input)
 		return m, tea.Batch(waitForStreamEvent(m.streamCh), m.spinner.Tick)
+	case "pgup":
+		m.viewport.HalfPageUp()
+		m.atBottom = m.viewport.AtBottom()
+		if m.atBottom {
+			m.newBelow = false
+		}
+		return m, nil
+	case "pgdown":
+		m.viewport.HalfPageDown()
+		m.atBottom = m.viewport.AtBottom()
+		if m.atBottom {
+			m.newBelow = false
+		}
+		return m, nil
+	case "home":
+		m.viewport.GotoTop()
+		m.atBottom = m.viewport.AtBottom()
+		m.newBelow = true
+		return m, nil
+	case "end":
+		m.viewport.GotoBottom()
+		m.atBottom = true
+		m.newBelow = false
+		return m, nil
+	case "G":
+		m.viewport.GotoBottom()
+		m.atBottom = true
+		m.newBelow = false
+		return m, nil
+	case "up":
+		if m.textarea.Value() == "" {
+			m.viewport.LineUp(1)
+			m.atBottom = m.viewport.AtBottom()
+			if m.atBottom {
+				m.newBelow = false
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(msg)
+		return m, cmd
+	case "down":
+		if m.textarea.Value() == "" {
+			m.viewport.LineDown(1)
+			m.atBottom = m.viewport.AtBottom()
+			if m.atBottom {
+				m.newBelow = false
+			}
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.textarea, cmd = m.textarea.Update(msg)
+		return m, cmd
 	default:
 		var cmd tea.Cmd
 		m.textarea, cmd = m.textarea.Update(msg)
@@ -494,9 +560,12 @@ func (m model) renderTodoSidebar(height int) string {
 }
 
 func (m *model) resizeViewport(h int) {
+	wasAtBottom := m.viewport.AtBottom()
 	m.viewport = viewport.New(m.chatWidth(), h)
 	m.viewport.SetContent(m.renderMessages())
-	m.viewport.GotoBottom()
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+	}
 }
 
 func (m model) View() string {
@@ -549,13 +618,13 @@ func (m model) View() string {
 		m.viewport.View(),
 		sidebar,
 	)
-	return lipgloss.JoinVertical(lipgloss.Left,
-		banner,
-		chatWithSidebar,
-		sep,
-		statusBar,
-		inputArea,
-	)
+
+	parts := []string{banner, chatWithSidebar}
+	if m.newBelow {
+		parts = append(parts, scrollIndicatorStyle.Render("  ↓ new messages (G to jump)"))
+	}
+	parts = append(parts, sep, statusBar, inputArea)
+	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
 func (m *model) finalizeLastContent() {
@@ -625,6 +694,14 @@ func (m *model) handleStreamEvent(event StreamEvent) (tea.Model, tea.Cmd) {
 		}
 	case "done":
 		if m.current != nil {
+			if event.Content != "" {
+				for i := range m.current.Blocks {
+					if m.current.Blocks[i].Type == "content" && !m.current.Blocks[i].Done {
+						m.current.Blocks[i].Content = event.Content
+						break
+					}
+				}
+			}
 			m.finalizeLastContent()
 			m.messages = append(m.messages, *m.current)
 			m.current = nil
@@ -705,8 +782,15 @@ func (m *model) refreshView() {
 	if !m.ready {
 		return
 	}
+	wasAtBottom := m.viewport.AtBottom()
 	m.viewport.SetContent(m.renderMessages())
-	m.viewport.GotoBottom()
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+		m.newBelow = false
+	} else {
+		m.newBelow = true
+	}
+	m.atBottom = m.viewport.AtBottom()
 }
 
 func (m *model) renderMessages() string {
