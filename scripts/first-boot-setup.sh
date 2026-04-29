@@ -55,7 +55,7 @@ loginctl enable-linger lainos
 export XDG_RUNTIME_DIR=/run/user/1000
 mkdir -p "$XDG_RUNTIME_DIR"
 chown lainos:lainos "$XDG_RUNTIME_DIR"
-su - lainos -s /bin/bash -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user enable --now wh-gateway.service cloudflared.service"
+su - lainos -s /bin/bash -c "XDG_RUNTIME_DIR=/run/user/1000 systemctl --user enable --now wh-gateway.service cloudflared.service camofox.service"
 
 mkdir -p /var/lib/lainos
 echo "$PASSWORD" > /var/lib/lainos/.password

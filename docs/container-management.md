@@ -63,17 +63,22 @@ Services are managed by systemd (PID 1 inside the container). All services start
 
 ```bash
 # Restart the gateway service (after manual config changes or troubleshooting)
-podman exec lainos systemctl restart wh-gateway
+systemctl --user restart wh-gateway
 
 # Restart cloudflared (after changing cloudflared.yaml)
-podman exec lainos systemctl restart cloudflared
+systemctl --user restart cloudflared
+
+# Restart camofox
+systemctl --user restart camofox
 
 # Check service status
-podman exec lainos systemctl status wh-gateway
-podman exec lainos systemctl status cloudflared
+systemctl --user status wh-gateway
+systemctl --user status cloudflared
+systemctl --user status camofox
 
 # View service logs
-podman exec lainos journalctl -u wh-gateway -f
+journalctl --user -u wh-gateway -f
+journalctl --user -u camofox -f
 ```
 
 Note: `gateway.yaml` changes are hot-reloaded — you don't need to restart the gateway service for config updates. Only restart if the binary itself changed.

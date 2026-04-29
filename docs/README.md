@@ -6,6 +6,7 @@ Documentation for the lainos webhook gateway platform. These docs are available 
 
 - **[wh-gateway.md](wh-gateway.md)** — Configuring and using the webhook HTTP gateway: routes, handler scripts, environment variables, response behavior, hot-reload, and installing tools
 - **[lain.md](lain.md)** — The lain LLM chat CLI: profiles, config fields, MCP servers, built-in tools, context compaction, and nix package management
+- **[camofox.md](camofox.md)** — Anti-detection headless browser server: API reference, session persistence, search macros, service management
 - **[cloudflare-tunnel.md](cloudflare-tunnel.md)** — Setting up Cloudflare tunnels: creating new tunnels, using existing ones, DNS routing, and ingress configuration
 - **[container-management.md](container-management.md)** — Container lifecycle: build, start, stop, SSH access, systemd services, and volume mounts
 - **[examples.md](examples.md)** — Webhook handler examples: GitHub signature verification, push/deploy/issue/PR/release handlers, and the async handler pattern

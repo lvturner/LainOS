@@ -2,17 +2,19 @@
 
 ## Project Summary
 
-Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Config is YAML with hot-reload. Full plan lives in `PLAN.md`.
+Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Camofox provides an anti-detection headless browser server for AI agents. Config is YAML with hot-reload. Full plan lives in `PLAN.md`.
 
 ## Tech Stack
 
 - **Language**: Go (module lives in `gateway/`)
+- **Runtime**: Node.js 20 (via nix, for camofox)
 - **Container runtime**: podman (docker compatibility layer available)
 - **Base image**: `ghcr.io/ublue-os/ucore-minimal:stable`
 - **Process manager**: systemd (PID 1 in container)
 - **Config format**: YAML (`gopkg.in/yaml.v3`)
 - **Config hot-reload**: fsnotify (`github.com/fsnotify/fsnotify`)
 - **Container orchestration**: podman-compose via `compose.yaml`
+- **Browser automation**: Camofox (Camoufox-based anti-detection browser, REST API on port 9377)
 
 ## Build & Run Commands
 
@@ -77,7 +79,8 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 - Restart individual services inside the container via SSH:
   ```bash
   ssh -p 2222 lainos@localhost
-  systemctl restart wh-gateway
+  systemctl --user restart wh-gateway
+  systemctl --user restart camofox
   ```
 - Container uses `stop_signal: SIGRTMIN+3` for clean systemd shutdown
 
@@ -112,6 +115,19 @@ nix-collect-garbage
 
 Installed binaries are immediately available in PATH. Packages persist across container rebuilds via the `/nix` named volume and `~/.local` bind mount.
 
+## Camofox
+
+Camofox is installed at `/home/lainos/camofox-browser/` (cloned from `jo-inc/camofox-browser` at build time). It runs as a `camofox.service` user-level systemd unit.
+
+- **Install path**: `/home/lainos/camofox-browser/`
+- **Port**: 9377
+- **Node.js**: installed via nix (`nixpkgs#nodejs_20`)
+- **Browser binary**: Camoufox, cached in `~/.cache/camoufox/`
+- **Session data**: `~/.camofox/` (profiles, cookies, traces)
+- **Telemetry**: disabled (`CAMOFOX_CRASH_REPORT_ENABLED=false`)
+
+Key environment variables can be overridden via `systemctl --user edit camofox`. See `docs/camofox.md` for full API reference.
+
 ## Code Style
 
 - No comments unless explicitly asked
@@ -134,7 +150,7 @@ cd gateway && go test ./...
 
 ## Documentation
 
-User-facing documentation lives in `docs/` and is available inside the container at `/home/lainos/docs/`. When working on tasks, consult the docs folder for information about the gateway, lain, container management, cloudflare setup, webhook handler examples, and configuration. Use grep/glob to search `docs/` for relevant keywords before asking the user for help.
+User-facing documentation lives in `docs/` and is available inside the container at `/home/lainos/docs/`. When working on tasks, consult the docs folder for information about the gateway, lain, container management, cloudflare setup, camofox, webhook handler examples, and configuration. Use grep/glob to search `docs/` for relevant keywords before asking the user for help.
 
 ## File conventions
 

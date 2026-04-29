@@ -11,7 +11,15 @@ RUN CGO_ENABLED=0 go build -o lain .
 FROM ghcr.io/ublue-os/ucore-minimal:stable
 
 RUN mkdir -p /var/usrlocal/bin && \
-    rpm-ostree install curl https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+    rpm-ostree install \
+    curl \
+    https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm \
+    git unzip python3 \
+    gtk3 dbus-glib libXt alsa-lib libXcomposite libXcursor libXdamage libXfixes \
+    libXi libXrandr libXrender libXScrnSaver libXtst \
+    mesa-libEGL mesa-dri-drivers libgbm \
+    xorg-x11-server-Xvfb \
+    fontconfig google-noto-emoji-color-fonts liberation-fonts-common
 
 COPY --from=builder /build/wh-gateway /usr/local/bin/wh-gateway
 COPY --from=lain-builder /build/lain /usr/local/bin/lain
@@ -44,6 +52,10 @@ RUN curl -L https://nixos.org/nix/install | sh -s -- --no-daemon && \
     sed -i 's|"\$HOME/.local/bin:\$HOME/bin:"|"\$HOME/.nix-profile/bin:\$HOME/.local/bin:\$HOME/bin:"|' /home/lainos/.bashrc && \
     sed -i 's|PATH="\$HOME/.local/bin:\$HOME/bin:\$PATH"|PATH="\$HOME/.nix-profile/bin:\$HOME/.local/bin:\$HOME/bin:\$PATH"|' /home/lainos/.bashrc && \
     sed -i '/nix\.sh/d' /home/lainos/.bash_profile
+RUN /home/lainos/.nix-profile/bin/nix profile install nixpkgs#nodejs_20
+RUN git clone --depth 1 https://github.com/jo-inc/camofox-browser.git /home/lainos/camofox-browser && \
+    cd /home/lainos/camofox-browser && \
+    PATH="/home/lainos/.nix-profile/bin:$PATH" npm install --production
 USER root
 
 ENV PATH="/home/lainos/.nix-profile/bin:/home/lainos/.local/bin:${PATH}"
@@ -59,7 +71,8 @@ RUN mkdir -p /home/lainos/.config/systemd/user && \
     chown -R lainos:lainos /home/lainos/.config/systemd
 COPY systemd/wh-gateway.service /home/lainos/.config/systemd/user/
 COPY systemd/cloudflared.service /home/lainos/.config/systemd/user/
-RUN chown lainos:lainos /home/lainos/.config/systemd/user/wh-gateway.service /home/lainos/.config/systemd/user/cloudflared.service
+COPY systemd/camofox.service /home/lainos/.config/systemd/user/
+RUN chown lainos:lainos /home/lainos/.config/systemd/user/wh-gateway.service /home/lainos/.config/systemd/user/cloudflared.service /home/lainos/.config/systemd/user/camofox.service
 
 COPY scripts/first-boot-setup.sh /usr/local/bin/first-boot-setup.sh
 COPY scripts/init-wrapper.sh /usr/local/bin/init-wrapper.sh
