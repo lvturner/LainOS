@@ -9,6 +9,7 @@ Agent frameworks like [Hermes](https://github.com/nousresearch/hermes-agent) and
 - **[lain](docs/lain.md)** — Interactive LLM CLI with MCP tool support (the agent's interface to the system)
 - **[wh-gateway](docs/wh-gateway.md)** — HTTP webhook gateway for deterministic workflows (no LLM required)
 - **[cloudflared](docs/cloudflare-tunnel.md)** — Cloudflare tunnel for external ingress
+- **[camofox](docs/camofox.md)** — Anti-detection headless browser server for AI agents
 
 ## Quick Start
 
