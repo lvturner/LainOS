@@ -22,6 +22,12 @@ if [ ! -e /home/lainos/.nix-defexpr ] || [ -L /home/lainos/.nix-defexpr ]; then
     chown -h lainos:lainos /home/lainos/.nix-defexpr
 fi
 
+for unit in wh-gateway.service camofox.service; do
+    if [ -e "/home/lainos/.config/systemd/user/$unit" ] && [ -e "/usr/lib/systemd/user/$unit" ]; then
+        rm -f "/home/lainos/.config/systemd/user/$unit"
+    fi
+done
+
 PASSWORD=$(openssl rand -base64 18)
 echo "lainos:$PASSWORD" | chpasswd
 
