@@ -12,7 +12,7 @@ Environment=NIX_SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 Environment=NODE_ENV=production
 Environment=CAMOFOX_PORT=9377
 Environment=CAMOFOX_CRASH_REPORT_ENABLED=false
-ExecStart=/home/lainos/.nix-profile/bin/node --max-old-space-size=128 /home/lainos/camofox-browser/server.js
+ExecStart=/usr/bin/node --max-old-space-size=128 /usr/lib/camofox/server.js
 Restart=on-failure
 RestartSec=5
 

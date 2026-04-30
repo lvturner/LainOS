@@ -5,18 +5,6 @@ if [ -z "$(ls -A /home/lainos 2>/dev/null)" ]; then
     cp -a /etc/skel-lainos/. /home/lainos/
 fi
 
-mkdir -p /home/lainos/.config/systemd/user
-for unit in /etc/skel-lainos/.config/systemd/user/*.service; do
-    name=$(basename "$unit")
-    if [ ! -e "/home/lainos/.config/systemd/user/$name" ]; then
-        cp "$unit" "/home/lainos/.config/systemd/user/$name"
-    fi
-done
-chown -R lainos:lainos /home/lainos/.config/systemd
-
-PASSWORD=$(openssl rand -base64 18)
-echo "lainos:$PASSWORD" | chpasswd
-
 chown lainos:lainos /home/lainos
 chown -R lainos:lainos /home/lainos/.local
 chown -R lainos:lainos /home/lainos/config
@@ -34,21 +22,8 @@ if [ ! -e /home/lainos/.nix-defexpr ] || [ -L /home/lainos/.nix-defexpr ]; then
     chown -h lainos:lainos /home/lainos/.nix-defexpr
 fi
 
-mkdir -p /home/lainos/.local/bin
-chown lainos:lainos /home/lainos/.local/bin
-for nix_bin in /nix/store/*nix-*/bin/nix; do
-    if [ -x "$nix_bin" ]; then
-        nix_bindir=$(dirname "$nix_bin")
-        for bin in "$nix_bindir"/nix*; do
-            name=$(basename "$bin")
-            if [ ! -e "/home/lainos/.local/bin/$name" ]; then
-                ln -sf "$bin" "/home/lainos/.local/bin/$name"
-                chown -h lainos:lainos "/home/lainos/.local/bin/$name"
-            fi
-        done
-        break
-    fi
-done
+PASSWORD=$(openssl rand -base64 18)
+echo "lainos:$PASSWORD" | chpasswd
 
 loginctl enable-linger lainos
 

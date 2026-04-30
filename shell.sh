@@ -17,4 +17,4 @@ if [[ "$STATE" != "running" && "$STATE" != "degraded" ]]; then
     exit 1
 fi
 
-exec $RUNTIME exec -it -u lainos -w /home/lainos lainos /usr/local/bin/lain
+exec $RUNTIME exec -it -u lainos -w /home/lainos lainos /usr/bin/lain
