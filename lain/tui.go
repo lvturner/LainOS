@@ -48,6 +48,7 @@ var (
 	compactionStyle    = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("214"))
 	questionModalStyle = lipgloss.NewStyle().Padding(0, 1)
 	statusStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("214"))
+	ctxStyle           = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
 	scrollIndicatorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Faint(true)
 	todoHeaderStyle    = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	todoPendingStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
@@ -183,22 +184,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) handleWindowSize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
 	m.width = msg.Width
 	m.height = msg.Height
-	wasAtBottom := m.viewport.AtBottom()
-	for i := range m.messages {
-		m.messages[i].rendered = ""
-	}
-	m.viewport = viewport.New(m.chatWidth(), m.viewportHeight())
-	m.viewport.SetContent(m.renderMessages())
-	if wasAtBottom {
-		m.viewport.GotoBottom()
-	}
+	m.fullRedraw()
 	m.textarea.SetWidth(msg.Width)
 	m.ready = true
-	return m, nil
+	return m, tea.ClearScreen
 }
 
 func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
+	case "ctrl+l":
+		m.fullRedraw()
+		return m, tea.ClearScreen
 	case "ctrl+c":
 		if m.streaming {
 			if m.cancelFn != nil {
@@ -584,6 +580,17 @@ func (m *model) resizeViewport(h int) {
 	}
 }
 
+func (m *model) fullRedraw() {
+	for i := range m.messages {
+		m.messages[i].rendered = ""
+	}
+	h := m.viewportHeight()
+	if m.question != nil {
+		h = m.viewportHeightQuestion()
+	}
+	m.resizeViewport(h)
+}
+
 func (m model) View() string {
 	sessionTitle := ""
 	if m.currentSession != nil {
@@ -624,7 +631,10 @@ func (m model) View() string {
 	} else if m.streaming {
 		statusBar = statusStyle.Render("  " + m.spinner.View() + " thinking...")
 	} else {
-		statusBar = " "
+		pct := m.llmClient.ContextPercent()
+		ctxWin := m.llmClient.ContextWindow()
+		ctxLabel := fmt.Sprintf("ctx: %d%% (%dk/%dk)", pct, pct*ctxWin/100/1000, ctxWin/1000)
+		statusBar = ctxStyle.Render("  " + ctxLabel)
 	}
 
 	inputArea := inputStyle.Render(m.textarea.View())
@@ -698,6 +708,14 @@ func (m model) handleStreamEvent(event StreamEvent) (model, tea.Cmd) {
 			m.current.Blocks = append(m.current.Blocks, MessageBlock{
 				Type:    "compaction",
 				Content: event.Content,
+			})
+		}
+	case "compaction_loop":
+		if m.current != nil {
+			m.finalizeLastContent()
+			m.current.Blocks = append(m.current.Blocks, MessageBlock{
+				Type:    "compaction",
+				Content: "⚠ " + event.Content,
 			})
 		}
 	case "nudge":

@@ -24,6 +24,8 @@ func RunOneShot(profile *Profile, registry *ToolRegistry, prompt string) error {
 			fmt.Fprintf(os.Stderr, "⟳ %s\n", event.Content)
 		case "compaction_failed":
 			fmt.Fprintf(os.Stderr, "⟳ %s\n", event.Content)
+		case "compaction_loop":
+			fmt.Fprintf(os.Stderr, "⚠ %s\n", event.Content)
 		case "nudge":
 			fmt.Fprintf(os.Stderr, "⟳ %s\n", event.Content)
 		case "error":

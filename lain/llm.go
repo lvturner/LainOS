@@ -39,6 +39,9 @@ type LLMClient struct {
 	nudgeMessage        string
 	noStream            bool
 	injectCh            chan string
+	compactionCount     int
+	thresholdBoost      int
+	lastUsage           *openai.Usage
 }
 
 func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools []openai.Tool, registry *ToolRegistry) *LLMClient {
@@ -76,9 +79,38 @@ func (c *LLMClient) CompactNow(ctx context.Context) error {
 }
 
 func (c *LLMClient) CompactionInfo() (estimated, threshold int) {
-	estimated = estimateTokens(c.history)
-	threshold = int(float64(c.contextWindow) * float64(c.compactionThreshold) / 100.0)
+	if c.lastUsage != nil && c.lastUsage.PromptTokens > 0 {
+		estimated = c.lastUsage.PromptTokens
+	} else {
+		estimated = estimateTokens(c.history)
+	}
+	effectiveThreshold := c.compactionThreshold + c.thresholdBoost
+	if effectiveThreshold > 90 {
+		effectiveThreshold = 90
+	}
+	threshold = int(float64(c.contextWindow) * float64(effectiveThreshold) / 100.0)
 	return
+}
+
+func (c *LLMClient) ContextPercent() int {
+	var used int
+	if c.lastUsage != nil && c.lastUsage.PromptTokens > 0 {
+		used = c.lastUsage.PromptTokens
+	} else {
+		used = estimateTokens(c.history)
+	}
+	if c.contextWindow <= 0 {
+		return 0
+	}
+	pct := used * 100 / c.contextWindow
+	if pct > 100 {
+		pct = 100
+	}
+	return pct
+}
+
+func (c *LLMClient) ContextWindow() int {
+	return c.contextWindow
 }
 
 func (c *LLMClient) InjectMessage(msg string) {
@@ -112,6 +144,8 @@ func (c *LLMClient) reloadAgents() {
 func (c *LLMClient) Chat(ctx context.Context, userMsg string) <-chan StreamEvent {
 	ch := make(chan StreamEvent, 100)
 	c.injectCh = make(chan string, 20)
+	c.compactionCount = 0
+	c.thresholdBoost = 0
 	c.reloadAgents()
 	c.history = append(c.history, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
@@ -137,12 +171,13 @@ outer:
 		timeoutExtension = 0
 
 		req := openai.ChatCompletionRequest{
-			Model:       c.model,
-			Messages:    c.buildMessages(),
-			Tools:       c.tools,
-			Temperature: float32(c.temperature),
-			MaxTokens:   c.maxTokens,
-			Stream:      !c.noStream,
+			Model:         c.model,
+			Messages:      c.buildMessages(),
+			Tools:         c.tools,
+			Temperature:   float32(c.temperature),
+			MaxTokens:     c.maxTokens,
+			Stream:        !c.noStream,
+			StreamOptions: &openai.StreamOptions{IncludeUsage: true},
 		}
 
 		var content strings.Builder
@@ -179,6 +214,9 @@ outer:
 						tcCopy := tc
 						toolCalls[i] = &tcCopy
 					}
+				}
+				if r.resp.Usage.TotalTokens > 0 {
+					c.lastUsage = &r.resp.Usage
 				}
 			case <-timer.C:
 				nudgeCount++
@@ -260,6 +298,9 @@ outer:
 						return
 					}
 					if len(r.resp.Choices) == 0 {
+						if r.resp.Usage != nil && r.resp.Usage.TotalTokens > 0 {
+							c.lastUsage = r.resp.Usage
+						}
 						continue
 					}
 					choice := r.resp.Choices[0]
@@ -528,6 +569,7 @@ func (c *LLMClient) History() []openai.ChatCompletionMessage {
 
 func (c *LLMClient) SetHistory(msgs []openai.ChatCompletionMessage) {
 	c.history = msgs
+	c.lastUsage = nil
 }
 
 type askQuestionArgs struct {

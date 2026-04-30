@@ -104,7 +104,9 @@ func (s *SessionPickerState) View(width int) string {
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("86"))
 	dimStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
-	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true)
+	cursorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("86")).Bold(true).Background(lipgloss.Color("237"))
+	cursorDimStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Background(lipgloss.Color("237"))
+	previewStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
 
 	var b strings.Builder
 
@@ -118,13 +120,16 @@ func (s *SessionPickerState) View(width int) string {
 	}
 	b.WriteString("\n")
 
+	linesPerEntry := 3
+
 	listH := h - 6
 	if listH < 2 {
 		listH = 2
 	}
+	listH = max(1, listH/linesPerEntry)
 
 	if s.showPreview {
-		listH = max(2, listH/2)
+		listH = max(1, listH/2)
 	}
 
 	if len(s.filtered) == 0 {
@@ -134,25 +139,23 @@ func (s *SessionPickerState) View(width int) string {
 		start := max(0, min(s.cursor-listH+1, n-listH))
 		end := min(start+listH, n)
 
-		for i := start; i < end; i++ {
-			sess := s.filtered[i]
-			relTime := relativeTime(sess.Updated)
-			prefix := "  "
-			if i == s.cursor {
-				prefix = "> "
-			}
+	for i := start; i < end; i++ {
+		sess := s.filtered[i]
+		relTime := relativeTime(sess.Updated)
 
-			if i == s.cursor {
-				b.WriteString(cursorStyle.Render(prefix + sess.Title))
-			} else {
-				b.WriteString(prefix + sess.Title)
-			}
+		if i == s.cursor {
+			b.WriteString(cursorStyle.Render("▸ " + sess.Title))
 			b.WriteString("\n")
-			b.WriteString(dimStyle.Render(prefix + relTime))
-			if i < end-1 {
-				b.WriteString("\n")
-			}
+			b.WriteString(cursorDimStyle.Render("  " + relTime))
+		} else {
+			b.WriteString("  " + sess.Title)
+			b.WriteString("\n")
+			b.WriteString(dimStyle.Render("  " + relTime))
 		}
+		if i < end-1 {
+			b.WriteString("\n")
+		}
+	}
 	}
 
 	if s.showPreview && len(s.filtered) > 0 && s.cursor < len(s.filtered) {
@@ -173,7 +176,7 @@ func (s *SessionPickerState) View(width int) string {
 			if width > 0 && len(line) > width-4 {
 				line = line[:width-7] + "..."
 			}
-			b.WriteString(dimStyle.Render(line))
+			b.WriteString(previewStyle.Render(line))
 			b.WriteString("\n")
 		}
 	}

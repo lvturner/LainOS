@@ -8,17 +8,17 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
-const compactionSystemPrompt = `You are a conversation compaction assistant. Your sole task is to produce a concise but complete summary of the conversation below.
+const compactionSystemPrompt = `You are a conversation compaction assistant. Produce an extremely concise summary of the conversation below. Target no more than 15% of the original conversation length.
 
-The summary MUST preserve:
-- All factual information exchanged (names, paths, values, configurations)
-- All decisions made and reasoning behind them
-- All actions taken (commands run, files written/modified, tool invocations and their results)
-- The current task or goal the user is working toward
-- Any code snippets, command outputs, or technical details still relevant
-- The state of any ongoing work (what is done, what remains)
+Compression rules:
+- Tool outputs (file reads, grep results, command outputs): keep only the key findings or results. Drop raw output verbatim.
+- Preserve ALL decisions, reasoning, and action items — these are more important than raw data.
+- Preserve all factual information: names, paths, values, configurations, code snippets still relevant.
+- Preserve the current task/goal and what remains to be done.
+- Merge repetitive exchanges into single statements.
+- Use abbreviated notation where unambiguous (e.g., "edited foo.go:42-58 to add X" instead of full file contents).
 
-Write the summary so that another AI assistant can seamlessly continue the conversation without missing any context. Do not add commentary, greetings, or explanations — output only the summary itself.`
+Output only the summary. No commentary, greetings, or explanations.`
 
 const charsPerToken = 4
 
@@ -50,8 +50,17 @@ func estimateTokens(messages []openai.ChatCompletionMessage) int {
 }
 
 func (c *LLMClient) needsCompaction() bool {
-	estimated := estimateTokens(c.history)
-	threshold := int(float64(c.contextWindow) * float64(c.compactionThreshold) / 100.0)
+	var estimated int
+	if c.lastUsage != nil && c.lastUsage.PromptTokens > 0 {
+		estimated = c.lastUsage.PromptTokens
+	} else {
+		estimated = estimateTokens(c.history)
+	}
+	effectiveThreshold := c.compactionThreshold + c.thresholdBoost
+	if effectiveThreshold > 90 {
+		effectiveThreshold = 90
+	}
+	threshold := int(float64(c.contextWindow) * float64(effectiveThreshold) / 100.0)
 	return estimated >= threshold
 }
 
@@ -131,5 +140,16 @@ func (c *LLMClient) compact(ctx context.Context, ch chan<- StreamEvent) {
 	}
 
 	c.history = newHistory
+	c.lastUsage = nil
+	c.compactionCount++
+	if c.compactionCount >= 2 && c.thresholdBoost == 0 {
+		c.thresholdBoost = 25
+		effectiveThreshold := c.compactionThreshold + c.thresholdBoost
+		if effectiveThreshold > 90 {
+			effectiveThreshold = 90
+		}
+		slog.Warn("compaction loop detected, raising threshold", "original", c.compactionThreshold, "boosted", effectiveThreshold)
+		ch <- StreamEvent{Type: "compaction_loop", Content: fmt.Sprintf("compaction loop detected — threshold raised to %d%% to prevent repeated compaction", effectiveThreshold)}
+	}
 	ch <- StreamEvent{Type: "compacted", Content: "context compacted"}
 }
