@@ -1,0 +1,12 @@
+[Unit]
+Description=Fix Home Directory Permissions
+Before=sshd.service first-boot-setup.service
+ConditionPathIsDirectory=/home/lainos
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/fix-home-permissions.sh
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

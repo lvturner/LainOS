@@ -105,13 +105,15 @@ ENV NIX_SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
 
 COPY docs/ /usr/share/doc/lainos/
 
+COPY systemd/fix-home-permissions.service /usr/lib/systemd/system/
 COPY systemd/first-boot-setup.service /usr/lib/systemd/system/
 COPY systemd/98-lainos.preset /usr/lib/systemd/system-preset/
 COPY systemd/cloudflared.service /etc/systemd/user/
 
+COPY scripts/fix-home-permissions.sh /usr/local/bin/fix-home-permissions.sh
 COPY scripts/first-boot-setup.sh /usr/local/bin/first-boot-setup.sh
 COPY scripts/init-wrapper.sh /usr/local/bin/init-wrapper.sh
-RUN chmod +x /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh
+RUN chmod +x /usr/local/bin/fix-home-permissions.sh /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh
 
 RUN cp -a /home/lainos /etc/skel-lainos
 

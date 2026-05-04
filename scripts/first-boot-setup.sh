@@ -5,11 +5,7 @@ if [ -z "$(ls -A /home/lainos 2>/dev/null)" ]; then
     cp -a /etc/skel-lainos/. /home/lainos/
 fi
 
-chown lainos:lainos /home/lainos
-chown -R lainos:lainos /home/lainos/.local
-chown -R lainos:lainos /home/lainos/config
-chown -R lainos:lainos /home/lainos/workspace
-chown -R lainos:lainos /home/lainos/.config
+chown -R lainos:lainos /home/lainos
 chown lainos:lainos /nix 2>/dev/null || true
 
 if [ ! -e /home/lainos/.nix-profile ] || [ -L /home/lainos/.nix-profile ]; then
