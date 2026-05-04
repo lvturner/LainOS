@@ -80,9 +80,9 @@ See **[docs/wh-gateway.md](docs/wh-gateway.md)** for route configuration, handle
 
 ## Lain CLI
 
-The `lainos` user's login shell is `bash`. The `lain` command starts the interactive LLM TUI with MCP tool support. Supports interactive TUI mode and one-shot mode (`--prompt`). Each profile configures an LLM connection, MCP servers, and system instructions. Built-in tools include `run_command` for shell execution and `extend_timeout` for long-running operations.
+The `lainos` user's login shell is `bash`. The `lain` command starts the interactive LLM TUI with MCP tool support, MDI window management, and a Lua plugin system for self-extension. Supports interactive TUI mode and one-shot mode (`--prompt`). Each profile configures an LLM connection, MCP servers, and system instructions. Built-in tools include `run_command` for shell execution and `extend_timeout` for long-running operations.
 
-See **[docs/lain.md](docs/lain.md)** for profiles, configuration, MCP servers, context compaction, and usage.
+See **[docs/lain.md](docs/lain.md)** for profiles, configuration, MCP servers, context compaction, window management, plugin API, and usage.
 
 ## Cloudflare Tunnel
 

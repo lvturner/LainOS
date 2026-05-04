@@ -1,6 +1,6 @@
 # lain — LLM Chat CLI
 
-An interactive LLM chat interface with MCP tool support, profile-based configuration, and a terminal UI. Runs inside the lainos container and can be launched with the `lain` command.
+An interactive LLM chat interface with MCP tool support, MDI window management, a Lua plugin system for self-extension, and profile-based configuration. Runs inside the lainos container and can be launched with the `lain` command.
 
 ## CLI Usage
 
@@ -15,13 +15,18 @@ The first non-flag positional argument is the profile name. The `--prompt` flag 
 
 ### Interactive Mode
 
-Full TUI with a scrollable chat viewport and multi-line input area:
+Full TUI with a multi-window MDI layout (tiled and floating panels), scrollable chat viewport, and multi-line input area:
 
 - **Enter** — Send message
 - **Alt+Enter** — Insert newline
-- **/quit** or **Ctrl+C** — Exit (Ctrl+C also cancels a streaming response)
+- **Ctrl+W** — Enter window management mode (normal mode)
+- **Ctrl+S** — Open session picker
+- **Ctrl+C** — Cancel streaming response or exit
+- **/quit** or **/exit** — Exit lain
 
-The banner shows the active profile name and model.
+The banner shows the active profile name, model, and session title.
+
+The default layout is a tiled split: chat viewport (left) + todo sidebar (right, 28 chars wide). Plugin windows can be added as additional tiles or as floating overlays.
 
 ### One-Shot Mode
 
@@ -191,6 +196,146 @@ Compaction preserves factual information, decisions, actions taken, code snippet
 
 Type `/compact` to manually trigger compaction at any time. This is useful when you want to reclaim context space before the automatic threshold is reached.
 
+## Window Management
+
+lain uses an MDI (Multiple Document Interface) with a tiling window manager. Press **Ctrl+W** to enter normal mode, where single-key commands control the layout (like tmux):
+
+| Key | Action |
+|---|---|
+| `h`/`j`/`k`/`l` | Focus left/down/up/right |
+| `x` | Close focused window (not chat) |
+| `f` | Toggle float/tile for focused window |
+| `+`/`-` | Resize split ratio |
+| `1`–`9` | Focus window by index |
+| `?` | Show help overlay |
+| `Esc` or `i` | Return to insert mode |
+
+The chat window is always present and cannot be closed. The todo sidebar is always shown on the right.
+
+## Plugin System
+
+Plugins are Lua scripts that extend lain's UI at runtime. They live at `~/.config/lain/plugins/*.lua` and are **hot-reloaded** on file change — no restart needed.
+
+Each plugin runs in an isolated Lua 5.1 sandbox. The standard `os`, `io`, `debug`, and `package` libraries are removed; only controlled APIs via the `lain.*` table are available.
+
+### Quick example
+
+Create `~/.config/lain/plugins/hello.lua`:
+
+```lua
+lain.window.register({
+  id = "hello",
+  title = "Hello",
+  float = false,
+  render = function(width, height)
+    return "Hello from Lua! Width: " .. width .. ", Height: " .. height
+  end,
+  update = function(event)
+  end,
+})
+```
+
+Save the file and the window appears immediately in the tiled layout.
+
+### Plugin API Reference
+
+#### lain.window
+
+| Function | Description |
+|---|---|
+| `register(opts)` | Register a window. `opts`: `{ id, title, float, render=fn, update=fn }` |
+| `close(id)` | Close and unregister a window |
+| `focus(id)` | Focus a window by ID |
+| `list()` | List all open window IDs |
+
+The `render` function receives `(width, height)` and must return a string. The `update` function receives an event table.
+
+#### lain.chat
+
+| Function | Description |
+|---|---|
+| `on_message(cb)` | Register callback: `cb(role, text)` called on every message |
+| `get_messages()` | Returns array of `{ role, content }` tables |
+
+#### lain.session
+
+| Function | Description |
+|---|---|
+| `get_id()` | Current session ID |
+| `get_title()` | Current session title |
+| `get_profile()` | Current profile name |
+
+#### lain.state
+
+| Function | Description |
+|---|---|
+| `set(key, value)` | Set per-plugin state (persists in memory) |
+| `get(key)` | Get per-plugin state |
+
+#### lain.log
+
+| Function | Description |
+|---|---|
+| `info(msg)` | Log info |
+| `warn(msg)` | Log warning |
+| `error(msg)` | Log error |
+
+#### lain.command
+
+| Function | Description |
+|---|---|
+| `register(name, cb)` | Register a `/name` slash command. `cb(arg)` receives the text after the command name. |
+
+#### lain.keybind
+
+| Function | Description |
+|---|---|
+| `register(key, cb)` | Register a normal-mode keybinding. `cb()` is called when the key is pressed in normal mode. |
+
+### Available Lua libraries
+
+Plugins can use: `string`, `table`, `math`, `coroutine`. The `os`, `io`, `debug`, and `package` libraries are **not** available.
+
+### Plugin directory
+
+```
+~/.config/lain/plugins/       → *.lua plugin files (hot-reloaded)
+~/.config/lain/plugins/state/ → per-plugin JSON state files
+```
+
+### Log viewer example
+
+```lua
+lain.window.register({
+  id = "log-viewer",
+  title = "Logs",
+  float = false,
+  render = function(width, height)
+    local lines = lain.state.get("lines") or {}
+    local out = {}
+    for i, line in ipairs(lines) do
+      if i > height then break end
+      out[i] = line
+    end
+    return table.concat(out, "\n")
+  end,
+  update = function(event)
+    if event.type == "key" and event.key == "r" then
+      lain.state.set("lines", {})
+      lain.log.info("logs cleared")
+    end
+  end,
+})
+
+lain.chat.on_message(function(role, text)
+  if role == "tool" then
+    local lines = lain.state.get("lines") or {}
+    table.insert(lines, text)
+    lain.state.set("lines", lines)
+  end
+end)
+```
+
 ## Slash Commands
 
 | Command | Description |
@@ -200,6 +345,10 @@ Type `/compact` to manually trigger compaction at any time. This is useful when 
 | `/rename <title>` | Rename current session |
 | `/sessions` | Open session picker |
 | `/compact` | Manually trigger context compaction |
+| `/plugins` | List loaded plugins and their windows |
+| `/plugins reload` | Force-reload all plugins from disk |
+| `/windows` | List open windows and their IDs |
+| `/float <id>` | Toggle floating for a window |
 | `/quit` or `/exit` | Exit lain |
 
 ## Nix Package Management

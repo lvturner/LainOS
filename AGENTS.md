@@ -6,7 +6,8 @@ Webhook HTTP gateway written in Go, running as a single privileged systemd conta
 
 ## Tech Stack
 
-- **Language**: Go (module lives in `gateway/`)
+- **Language**: Go (modules in `gateway/` and `lain/`)
+- **Plugin language**: Lua 5.1 via gopher-lua (`github.com/yuin/gopher-lua`)
 - **Runtime**: Node.js 20 (via nix, for camofox)
 - **Container runtime**: podman (docker compatibility layer available)
 - **Base image**: `ghcr.io/ublue-os/ucore-minimal:stable`
@@ -15,6 +16,7 @@ Webhook HTTP gateway written in Go, running as a single privileged systemd conta
 - **Config hot-reload**: fsnotify (`github.com/fsnotify/fsnotify`)
 - **Container orchestration**: podman-compose via `compose.yaml`
 - **Browser automation**: Camofox (Camoufox-based anti-detection browser, REST API on port 9377)
+- **TUI framework**: Bubble Tea + lipgloss (lain)
 
 ## Build & Run Commands
 
@@ -69,6 +71,70 @@ The Go source lives in `gateway/`. All `.go` files are in a single package (`mai
 - Command exit 0 → HTTP 200 with stdout
 - Command exit non-zero → HTTP 500 with stderr
 - Timeout → HTTP 504
+
+## Lain Application
+
+The lain interactive LLM CLI lives in `lain/`. All `.go` files are in a single package (`main`) at the directory root.
+
+### Dependencies
+
+- `github.com/yuin/gopher-lua` — Lua 5.1 VM, pure Go, no CGO
+- `github.com/fsnotify/fsnotify` — plugin directory hot-reload
+
+### Key modules
+
+| File | Responsibility |
+|---|---|
+| `main.go` | Entry point, flag parsing, wiring |
+| `tui.go` | Bubble Tea model, mode system (insert/normal), key routing, slash commands |
+| `window.go` | `Window` interface, `chatWindow` (viewport+messages), `todoWindow` (sidebar), `pluginWindow` (Lua callbacks) |
+| `wm.go` | `WindowManager`: layout rendering, focus cycling, resize, window add/remove |
+| `tile.go` | Binary layout tree: `SplitNode`/`LeafNode`, split/unsplit/resize, fixed-size splits |
+| `float.go` | Floating window overlay layer with z-order and ANSI positioning |
+| `plugin.go` | `PluginLoader`: sandboxed Lua 5.1 VMs, fsnotify hot-reload (debounced 500ms) |
+| `plugin_api.go` | `PluginAPI`: full `lain.*` Lua API surface (window, chat, session, state, log, command, keybind) |
+| `llm.go` | LLM client, streaming, agentic loop, tool execution, idle watchdog |
+| `tools.go` | Built-in tools: `run_command`, `ask_question`, `extend_timeout`, `todo` |
+| `mcp.go` | MCP server manager (stdio JSON-RPC) |
+| `compaction.go` | Context compaction (automatic + manual) |
+| `config.go` | Profile config loading (YAML + JSON + markdown) |
+| `profile.go` | Profile directory resolution |
+| `session.go` | Session persistence (markdown frontmatter), title generation |
+| `session_picker.go` | Session picker overlay (filter, preview) |
+| `question.go` | Question modal (options, multiple choice, custom input) |
+| `todo.go` | Task list persistence (JSON) |
+| `markdown.go` | Markdown rendering via glamour |
+| `banner.go` | ASCII banner |
+| `oneshot.go` | Non-interactive mode |
+
+### Window interface
+
+All UI panels implement `Window`:
+
+```go
+type Window interface {
+    ID() string
+    Title() string
+    Update(tea.Msg) (Window, tea.Cmd)
+    View(width, height int, focused bool) string
+    SetSize(width, height int)
+}
+```
+
+### Mode system
+
+| Mode | Trigger | Keys go to |
+|---|---|---|
+| Insert | Default, `i` from normal | textarea (chat input) |
+| Normal | `Ctrl+W` prefix | window manager commands |
+
+### Plugin system
+
+- Plugins are `.lua` files in `~/.config/lain/plugins/`
+- Each plugin runs in an isolated Lua 5.1 sandbox (`os`, `io`, `debug`, `package` removed)
+- fsnotify watches for changes — plugins hot-reload without restart
+- Plugins register windows, callbacks, slash commands, and keybindings via the `lain.*` API
+- All Lua execution happens on the Bubble Tea update goroutine (thread-safe)
 
 ## Container Architecture
 
@@ -133,19 +199,23 @@ Key environment variables can be overridden via `systemctl --user edit camofox`.
 - No comments unless explicitly asked
 - Follow existing Go conventions in the codebase
 - Keep all gateway source in `gateway/` as a flat `main` package
+- Keep all lain source in `lain/` as a flat `main` package
 - Use `log/slog` for structured logging
 - Use standard library HTTP types (`net/http`)
+- Lua plugins: use `lain.*` API only (no `os`/`io` access), keep render functions fast (called every frame)
 
 ## Testing
 
 After modifying Go code, always verify:
 ```bash
 cd gateway && go build ./...
+cd lain && go build ./...
 ```
 
 If test files exist:
 ```bash
 cd gateway && go test ./...
+cd lain && go test ./...
 ```
 
 ## Documentation
@@ -160,3 +230,5 @@ User-facing documentation lives in `docs/` and is available inside the container
 - Systemd unit files go in `systemd/`
 - Shell scripts go in `scripts/`
 - Systemd presets go in `systemd/` as `98-lainos.preset` (must sort before `99-default-disable.preset`)
+- Plugin files are `.lua` in `~/.config/lain/plugins/`
+- Plugin state files are `.json` in `~/.config/lain/plugins/state/`
