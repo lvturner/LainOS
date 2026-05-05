@@ -426,11 +426,6 @@ func (m model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.chat.atBottom = true
 		m.chat.newBelow = false
 		return m, nil
-	case "G":
-		m.chat.vp.GotoBottom()
-		m.chat.atBottom = true
-		m.chat.newBelow = false
-		return m, nil
 	case "up":
 		if m.textarea.Value() == "" {
 			m.chat.vp.LineUp(1)
@@ -507,6 +502,11 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "l", "right":
 		m.wm.FocusSpatial(FocusRight)
+		return m, nil
+	case "G":
+		m.chat.vp.GotoBottom()
+		m.chat.atBottom = true
+		m.chat.newBelow = false
 		return m, nil
 	case "ctrl+left":
 		if m.wm.HasFloating(m.wm.FocusedID()) {
@@ -999,7 +999,7 @@ func (m model) View() string {
 
 	parts := []string{banner, m.wm.View()}
 	if m.chat.newBelow {
-		parts = append(parts, scrollIndicatorStyle.Render("  ↓ new messages (G to jump)"))
+		parts = append(parts, scrollIndicatorStyle.Render("  ↓ new messages (end to jump)"))
 	}
 	parts = append(parts, sep, statusBar, inputArea)
 	result := lipgloss.JoinVertical(lipgloss.Left, parts...)

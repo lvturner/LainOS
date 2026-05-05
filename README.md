@@ -61,15 +61,18 @@ ssh -p 2222 lainos@localhost
 
 ```
 install.sh        → One-shot curl-able installer
+start.sh          → Build, start, and open lain shell
+shell.sh          → Re-open lain shell (container stays running)
+rebuild.sh        → Pull latest base image, rebuild, and restart container
+deploy-bin.sh     → Build and hot-swap Go binaries into running container
 config/           → gateway.yaml, cloudflared.yaml, lain profiles (bind-mounted)
 .data/snapshots/  → Home directory snapshots (bind-mounted)
-workspace/        → Handler scripts (bind-mounted)
-local/            → ~/.local for the lainos user (bind-mounted)
+.data/home/       → Entire /home/lainos directory (bind-mounted)
 docs/             → Documentation (COPY'd into container at /home/lainos/docs/)
 gateway/          → Go webhook gateway source
 lain/             → Go lain CLI source
 systemd/          → Container systemd unit files
-scripts/          → First-boot setup, init wrapper, shared detection functions
+scripts/          → First-boot setup, init wrapper, snapshot scripts, shared detection functions
 Containerfile     → Multi-stage container build
 compose.yaml      → Compose definition (podman or docker)
 ```
@@ -126,10 +129,15 @@ Installed binaries are immediately available in PATH. The container's root files
 ```bash
 ./start.sh                      # Build, start, open lain shell
 ./shell.sh                      # Re-open lain shell (container runs in background)
-podman-compose up -d --build    # Rebuild after code changes
+./rebuild.sh                    # Pull latest base image, rebuild, and restart
+./deploy-bin.sh                 # Build and hot-swap Go binaries into running container
+./deploy-bin.sh lain            # Deploy only the lain binary
+./deploy-bin.sh gateway         # Deploy only the gateway binary
 podman logs -f lainos           # View logs
 podman-compose down             # Stop
 ```
+
+`deploy-bin.sh` builds the Go binary on the host and copies it into the running container via `podman cp`, so you can iterate on `lain/` or `gateway/` without a full container rebuild. The new binary takes effect on next launch inside the container.
 
 All commands work with `docker compose` as a drop-in replacement if you don't have podman installed.
 
