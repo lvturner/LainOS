@@ -72,7 +72,7 @@ func (wm *WindowManager) Remove(id string) {
 		return
 	}
 	if wm.zoomedID == id {
-		wm.ToggleZoom()
+		wm.toggleZoomLocked()
 	}
 	if wm.root != nil {
 		wm.root.remove(id)
@@ -161,8 +161,8 @@ func (wm *WindowManager) SetFocused(id string) {
 	defer wm.mu.Unlock()
 	if _, ok := wm.windows[id]; ok {
 		wm.focused = id
-		if wm.HasFloating(id) {
-			wm.BringToFront(id)
+		if wm.hasFloatingLocked(id) {
+			wm.bringToFrontLocked(id)
 		}
 	}
 }
@@ -176,8 +176,8 @@ func (wm *WindowManager) FocusNext() {
 	for i, id := range wm.focusOrder {
 		if id == wm.focused {
 			wm.focused = wm.focusOrder[(i+1)%len(wm.focusOrder)]
-			if wm.HasFloating(wm.focused) {
-				wm.BringToFront(wm.focused)
+			if wm.hasFloatingLocked(wm.focused) {
+				wm.bringToFrontLocked(wm.focused)
 			}
 			return
 		}
@@ -194,8 +194,8 @@ func (wm *WindowManager) FocusPrev() {
 	for i, id := range wm.focusOrder {
 		if id == wm.focused {
 			wm.focused = wm.focusOrder[(i-1+len(wm.focusOrder))%len(wm.focusOrder)]
-			if wm.HasFloating(wm.focused) {
-				wm.BringToFront(wm.focused)
+			if wm.hasFloatingLocked(wm.focused) {
+				wm.bringToFrontLocked(wm.focused)
 			}
 			return
 		}
@@ -210,8 +210,8 @@ func (wm *WindowManager) FocusByIndex(idx int) {
 		return
 	}
 	wm.focused = wm.focusOrder[idx]
-	if wm.HasFloating(wm.focused) {
-		wm.BringToFront(wm.focused)
+	if wm.hasFloatingLocked(wm.focused) {
+		wm.bringToFrontLocked(wm.focused)
 	}
 }
 
@@ -221,14 +221,14 @@ func (wm *WindowManager) FocusSpatial(dir FocusDir) {
 	if wm.root == nil || wm.focused == "" {
 		return
 	}
-	if wm.HasFloating(wm.focused) {
+	if wm.hasFloatingLocked(wm.focused) {
 		return
 	}
 	target := wm.root.findAdjacentLeaf(wm.focused, dir, wm.width, wm.height)
 	if target != nil && target.Leaf != nil {
 		wm.focused = target.Leaf.WindowID
-		if wm.HasFloating(wm.focused) {
-			wm.BringToFront(wm.focused)
+		if wm.hasFloatingLocked(wm.focused) {
+			wm.bringToFrontLocked(wm.focused)
 		}
 	}
 }
@@ -239,10 +239,10 @@ func (wm *WindowManager) ResizeFocused(delta float64) {
 	if wm.root == nil || wm.focused == "" {
 		return
 	}
-	if wm.HasFloating(wm.focused) {
+	if wm.hasFloatingLocked(wm.focused) {
 		dw := int(delta * 40)
 		dh := int(delta * 20)
-		wm.ResizeFloating(wm.focused, dw, dh)
+		wm.resizeFloatingLocked(wm.focused, dw, dh)
 		return
 	}
 	parent := wm.root.findParent(wm.focused)
@@ -266,8 +266,7 @@ func (wm *WindowManager) View() string {
 	}
 	if wm.zoomedID != "" {
 		if _, ok := wm.windows[wm.zoomedID]; !ok {
-			wm.ToggleZoom()
-			return wm.renderNode(wm.root, wm.width, wm.height)
+			wm.toggleZoomLocked()
 		}
 		return wm.renderNode(wm.root, wm.width, wm.height)
 	}
@@ -396,7 +395,7 @@ func (wm *WindowManager) MoveFocused(dir FocusDir) {
 	}
 	target := wm.root.findAdjacentLeaf(wm.focused, dir, wm.width, wm.height)
 	if target != nil && target.Leaf != nil {
-		wm.SwapWindows(wm.focused, target.Leaf.WindowID)
+		wm.swapWindowsLocked(wm.focused, target.Leaf.WindowID)
 	}
 }
 
@@ -539,12 +538,70 @@ func (wm *WindowManager) RemoveFloating(id string) {
 func (wm *WindowManager) HasFloating(id string) bool {
 	wm.mu.RLock()
 	defer wm.mu.RUnlock()
+	return wm.hasFloatingLocked(id)
+}
+
+func (wm *WindowManager) hasFloatingLocked(id string) bool {
 	for _, fw := range wm.floating {
 		if fw.ID() == id {
 			return true
 		}
 	}
 	return false
+}
+
+func (wm *WindowManager) bringToFrontLocked(id string) {
+	maxZ := 0
+	for _, fw := range wm.floating {
+		if fw.ZOrder > maxZ {
+			maxZ = fw.ZOrder
+		}
+	}
+	for _, fw := range wm.floating {
+		if fw.ID() == id {
+			fw.ZOrder = maxZ + 1
+			return
+		}
+	}
+}
+
+func (wm *WindowManager) resizeFloatingLocked(id string, dw, dh int) {
+	for _, fw := range wm.floating {
+		if fw.ID() == id {
+			fw.W += dw
+			fw.H += dh
+			if fw.W < 10 {
+				fw.W = 10
+			}
+			if fw.H < 5 {
+				fw.H = 5
+			}
+			fw.Window.SetSize(fw.W, fw.H)
+			return
+		}
+	}
+}
+
+func (wm *WindowManager) swapWindowsLocked(id1, id2 string) bool {
+	if wm.root == nil {
+		return false
+	}
+	return wm.root.swapLeaves(id1, id2)
+}
+
+func (wm *WindowManager) toggleZoomLocked() {
+	if wm.zoomedID != "" {
+		wm.root = wm.prevRoot
+		wm.zoomedID = ""
+	} else {
+		if wm.focused == "" {
+			return
+		}
+		wm.prevRoot = wm.root
+		wm.zoomedID = wm.focused
+		wm.root = newLeafNode(wm.focused)
+	}
+	wm.setsizeLocked(wm.width, wm.height)
 }
 
 func (wm *WindowManager) FloatingView(baseContent string, termWidth int) string {
