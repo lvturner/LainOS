@@ -263,7 +263,29 @@ lain.log.warn("msg")
 lain.log.error("msg")
 ```
 
-**Available Lua libraries:** `string`, `table`, `math`, `coroutine`. No `os`, `io`, `debug`, or `package`.
+**Available Lua libraries:** `string`, `table`, `math`, `coroutine`, `io`, `os`, `debug`, `package`. The full Lua 5.1 standard library is available — use `io.popen`, `os.execute`, etc. freely. For reliable command execution from render/callback functions, prefer `lain.exec()` (see below).
+
+**Note:** Render functions have a 50ms timeout. Use `lain.exec_async()` for commands inside render functions. Callbacks have a 5s timeout — `lain.exec()` with fast commands is fine.
+
+**Command execution:**
+```lua
+-- Synchronous (blocks until command finishes, returns result table)
+local r = lain.exec("ls -la")
+-- r.stdout, r.stderr, r.exit_code, r.success
+
+-- With options
+local r = lain.exec("make test", {
+  timeout = 60,     -- seconds (default: 30)
+  cwd = "/path",    -- working directory
+  env = { K = "V" } -- extra env vars
+})
+
+-- Asynchronous (returns immediately, calls back with result)
+lain.exec("curl -s https://example.com", { timeout = 10 }, function(r)
+  lain.state.set("page", r.stdout)
+  lain.window.invalidate("my-panel")
+end)
+```
 
 ### Example: log viewer
 

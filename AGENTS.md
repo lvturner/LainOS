@@ -92,8 +92,8 @@ The lain interactive LLM CLI lives in `lain/`. All `.go` files are in a single p
 | `wm.go` | `WindowManager`: layout rendering, focus cycling, resize, window add/remove |
 | `tile.go` | Binary layout tree: `SplitNode`/`LeafNode`, split/unsplit/resize, fixed-size splits |
 | `float.go` | Floating window overlay layer with z-order and ANSI positioning |
-| `plugin.go` | `PluginLoader`: sandboxed Lua 5.1 VMs, fsnotify hot-reload (debounced 500ms) |
-| `plugin_api.go` | `PluginAPI`: full `lain.*` Lua API surface (window, chat, session, state, log, command, keybind) |
+| `plugin.go` | `PluginLoader`: Lua 5.1 VMs (full standard library), fsnotify hot-reload (debounced 500ms) |
+| `plugin_api.go` | `PluginAPI`: full `lain.*` Lua API surface (window, chat, session, state, log, command, keybind, exec) |
 | `llm.go` | LLM client, streaming, agentic loop, tool execution, idle watchdog |
 | `tools.go` | Built-in tools: `run_command`, `ask_question`, `extend_timeout`, `todo` |
 | `mcp.go` | MCP server manager (stdio JSON-RPC) |
@@ -135,10 +135,31 @@ type Window interface {
 ### Plugin system
 
 - Plugins are `.lua` files in `~/.config/lain/plugins/`
-- Each plugin runs in a Lua 5.1 state with full standard libraries (`base`, `string`, `table`, `math`, `coroutine`, `io`, `os`, `package`); only `debug` is omitted
+- Each plugin runs in a Lua 5.1 state with the full standard library (`base`, `string`, `table`, `math`, `coroutine`, `io`, `os`, `debug`, `package`)
 - fsnotify watches for changes — plugins hot-reload without restart
 - Plugins register windows, callbacks, slash commands, and keybindings via the `lain.*` API
 - All Lua execution happens on the Bubble Tea update goroutine (thread-safe)
+
+#### Plugin auto-start
+
+Control which plugins load automatically on launch via `config.yaml`:
+
+```yaml
+plugins:
+  enabled: ["weather", "clock"]  # only these auto-load; omit or empty = all plugins load
+  render_timeout: 50ms
+  callback_timeout: 5s
+  load_timeout: 10s
+```
+
+- If `plugins.enabled` is absent or empty, **all** `.lua` files in the plugins directory load on start (backward compatible)
+- The file watcher monitors the entire directory regardless of the enabled list, so newly-added files are still detected
+- Slash commands for manual control:
+  - `/plugins start` — load all plugins
+  - `/plugins start <name>` — load a specific plugin
+  - `/plugins stop <name>` — unload a specific plugin
+  - `/plugins reload [name]` — reload one or all plugins
+  - `/plugins` — list loaded plugins
 
 ### Sub-Agent System
 
@@ -255,7 +276,7 @@ Changes require `systemctl --user restart home-snapshot`.
 - Keep all lain source in `lain/` as a flat `main` package
 - Use `log/slog` for structured logging
 - Use standard library HTTP types (`net/http`)
-- Lua plugins: use `lain.*` API for TUI integration; `io`/`os` libraries are available for filesystem and system access; keep render functions fast (called every frame)
+- Lua plugins: use `lain.*` API for TUI integration; full standard library available including `io`/`os` for filesystem and system access; use `lain.exec()` for command execution in render/callback contexts; keep render functions fast (called every frame)
 
 ## Testing
 

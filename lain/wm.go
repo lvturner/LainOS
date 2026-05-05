@@ -3,6 +3,7 @@ package main
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -17,16 +18,17 @@ const (
 )
 
 type WindowManager struct {
-	root           *LayoutNode
-	windows        map[string]Window
-	focusOrder     []string
-	focused        string
-	floating       []*FloatingWindow
-	width          int
-	height         int
-	bordersEnabled bool
-	zoomedID       string
-	prevRoot       *LayoutNode
+	mu              sync.RWMutex
+	root            *LayoutNode
+	windows         map[string]Window
+	focusOrder      []string
+	focused         string
+	floating        []*FloatingWindow
+	width           int
+	height          int
+	bordersEnabled  bool
+	zoomedID        string
+	prevRoot        *LayoutNode
 }
 
 func NewWindowManager(width, height int) *WindowManager {
@@ -39,6 +41,8 @@ func NewWindowManager(width, height int) *WindowManager {
 }
 
 func (wm *WindowManager) Add(w Window) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	wm.windows[w.ID()] = w
 	wm.focusOrder = append(wm.focusOrder, w.ID())
 	if wm.focused == "" {
@@ -50,6 +54,8 @@ func (wm *WindowManager) Add(w Window) {
 }
 
 func (wm *WindowManager) AddWithSplit(existingID string, dir SplitDirection, w Window, fixedRight int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	wm.windows[w.ID()] = w
 	wm.focusOrder = append(wm.focusOrder, w.ID())
 	if wm.root == nil {
@@ -60,6 +66,8 @@ func (wm *WindowManager) AddWithSplit(existingID string, dir SplitDirection, w W
 }
 
 func (wm *WindowManager) Remove(id string) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if id == "chat" {
 		return
 	}
@@ -86,6 +94,12 @@ func (wm *WindowManager) Remove(id string) {
 }
 
 func (wm *WindowManager) SetSize(width, height int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
+	wm.setsizeLocked(width, height)
+}
+
+func (wm *WindowManager) setsizeLocked(width, height int) {
 	wm.width = width
 	wm.height = height
 	if wm.root == nil {
@@ -121,11 +135,15 @@ func (wm *WindowManager) SetSize(width, height int) {
 }
 
 func (wm *WindowManager) ToggleBorders() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	wm.bordersEnabled = !wm.bordersEnabled
-	wm.SetSize(wm.width, wm.height)
+	wm.setsizeLocked(wm.width, wm.height)
 }
 
 func (wm *WindowManager) Focused() Window {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	if wm.focused == "" {
 		return nil
 	}
@@ -133,10 +151,14 @@ func (wm *WindowManager) Focused() Window {
 }
 
 func (wm *WindowManager) FocusedID() string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	return wm.focused
 }
 
 func (wm *WindowManager) SetFocused(id string) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if _, ok := wm.windows[id]; ok {
 		wm.focused = id
 		if wm.HasFloating(id) {
@@ -146,6 +168,8 @@ func (wm *WindowManager) SetFocused(id string) {
 }
 
 func (wm *WindowManager) FocusNext() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if len(wm.focusOrder) == 0 {
 		return
 	}
@@ -162,6 +186,8 @@ func (wm *WindowManager) FocusNext() {
 }
 
 func (wm *WindowManager) FocusPrev() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if len(wm.focusOrder) == 0 {
 		return
 	}
@@ -178,6 +204,8 @@ func (wm *WindowManager) FocusPrev() {
 }
 
 func (wm *WindowManager) FocusByIndex(idx int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if idx < 0 || idx >= len(wm.focusOrder) {
 		return
 	}
@@ -188,6 +216,8 @@ func (wm *WindowManager) FocusByIndex(idx int) {
 }
 
 func (wm *WindowManager) FocusSpatial(dir FocusDir) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.root == nil || wm.focused == "" {
 		return
 	}
@@ -204,6 +234,8 @@ func (wm *WindowManager) FocusSpatial(dir FocusDir) {
 }
 
 func (wm *WindowManager) ResizeFocused(delta float64) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.root == nil || wm.focused == "" {
 		return
 	}
@@ -222,11 +254,13 @@ func (wm *WindowManager) ResizeFocused(delta float64) {
 		if parent.Split.Ratio > 0.9 {
 			parent.Split.Ratio = 0.9
 		}
-		wm.SetSize(wm.width, wm.height)
+		wm.setsizeLocked(wm.width, wm.height)
 	}
 }
 
 func (wm *WindowManager) View() string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	if wm.root == nil {
 		return ""
 	}
@@ -324,6 +358,8 @@ func (wm *WindowManager) renderNode(node *LayoutNode, w, h int) string {
 }
 
 func (wm *WindowManager) ListWindows() []string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	if wm.root == nil {
 		return nil
 	}
@@ -331,15 +367,21 @@ func (wm *WindowManager) ListWindows() []string {
 }
 
 func (wm *WindowManager) Get(id string) Window {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	return wm.windows[id]
 }
 
 func (wm *WindowManager) Has(id string) bool {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	_, ok := wm.windows[id]
 	return ok
 }
 
 func (wm *WindowManager) SwapWindows(id1, id2 string) bool {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.root == nil {
 		return false
 	}
@@ -347,6 +389,8 @@ func (wm *WindowManager) SwapWindows(id1, id2 string) bool {
 }
 
 func (wm *WindowManager) MoveFocused(dir FocusDir) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.root == nil || wm.focused == "" {
 		return
 	}
@@ -357,6 +401,8 @@ func (wm *WindowManager) MoveFocused(dir FocusDir) {
 }
 
 func (wm *WindowManager) ToggleZoom() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.zoomedID != "" {
 		wm.root = wm.prevRoot
 		wm.zoomedID = ""
@@ -368,22 +414,28 @@ func (wm *WindowManager) ToggleZoom() {
 		wm.zoomedID = wm.focused
 		wm.root = newLeafNode(wm.focused)
 	}
-	wm.SetSize(wm.width, wm.height)
+	wm.setsizeLocked(wm.width, wm.height)
 }
 
 func (wm *WindowManager) IsZoomed() bool {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	return wm.zoomedID != ""
 }
 
 func (wm *WindowManager) Equalize() {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	if wm.root == nil {
 		return
 	}
 	wm.root.equalize()
-	wm.SetSize(wm.width, wm.height)
+	wm.setsizeLocked(wm.width, wm.height)
 }
 
 func (wm *WindowManager) MoveFloating(id string, dx, dy int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	for _, fw := range wm.floating {
 		if fw.ID() == id {
 			fw.X += dx
@@ -406,6 +458,8 @@ func (wm *WindowManager) MoveFloating(id string, dx, dy int) {
 }
 
 func (wm *WindowManager) ResizeFloating(id string, dw, dh int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	for _, fw := range wm.floating {
 		if fw.ID() == id {
 			fw.W += dw
@@ -423,6 +477,8 @@ func (wm *WindowManager) ResizeFloating(id string, dw, dh int) {
 }
 
 func (wm *WindowManager) BringToFront(id string) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	maxZ := 0
 	for _, fw := range wm.floating {
 		if fw.ZOrder > maxZ {
@@ -438,6 +494,8 @@ func (wm *WindowManager) BringToFront(id string) {
 }
 
 func (wm *WindowManager) AddFloating(w Window, x, y, width, height int) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	fw := &FloatingWindow{
 		Window: w,
 		X:      x,
@@ -454,6 +512,8 @@ func (wm *WindowManager) AddFloating(w Window, x, y, width, height int) {
 }
 
 func (wm *WindowManager) RemoveFloating(id string) {
+	wm.mu.Lock()
+	defer wm.mu.Unlock()
 	for i, fw := range wm.floating {
 		if fw.ID() == id {
 			wm.floating = append(wm.floating[:i], wm.floating[i+1:]...)
@@ -477,6 +537,8 @@ func (wm *WindowManager) RemoveFloating(id string) {
 }
 
 func (wm *WindowManager) HasFloating(id string) bool {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	for _, fw := range wm.floating {
 		if fw.ID() == id {
 			return true
@@ -486,6 +548,8 @@ func (wm *WindowManager) HasFloating(id string) bool {
 }
 
 func (wm *WindowManager) FloatingView(baseContent string, termWidth int) string {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
 	if len(wm.floating) == 0 {
 		return baseContent
 	}

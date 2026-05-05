@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
+	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	lua "github.com/yuin/gopher-lua"
@@ -14,6 +17,14 @@ type luaCallback struct {
 	L  *lua.LState
 	Fn *lua.LFunction
 }
+
+type pluginRenderMsg struct {
+	windowID string
+	content  string
+	err      error
+}
+
+type pluginRenderTickMsg time.Time
 
 type PluginAPI struct {
 	wm               *WindowManager
@@ -29,31 +40,46 @@ type PluginAPI struct {
 	errCh            chan PluginError
 	pluginKeybinds   map[string]string
 	onWindowChange   func()
+	executors        map[string]*pluginExecutor
+	renderResultCh   chan pluginRenderMsg
+	renderTimeout    time.Duration
+	callbackTimeout  time.Duration
+	loadTimeout      time.Duration
+	dataCallbacks    map[string][]luaCallback
 }
 
 type pluginWindow struct {
-	id         string
-	title      string
-	pluginName string
-	L          *lua.LState
-	renderFn   *lua.LFunction
-	updateFn   *lua.LFunction
-	width      int
-	height     int
-	state      map[string]any
-	api        *PluginAPI
+	id           string
+	title        string
+	pluginName   string
+	L            *lua.LState
+	renderFn     *lua.LFunction
+	updateFn     *lua.LFunction
+	width        int
+	height       int
+	state        map[string]any
+	api          *PluginAPI
+	executor     *pluginExecutor
+	cachedRender string
+	renderMu     sync.RWMutex
+	lastWidth    int
+	lastHeight   int
+	renderDirty  bool
+	pendingKeys  []string
+	keyMu        sync.Mutex
 }
 
 func newPluginWindow(id, title, pluginName string, L *lua.LState, renderFn, updateFn *lua.LFunction, api *PluginAPI) *pluginWindow {
 	return &pluginWindow{
-		id:         id,
-		title:      title,
-		pluginName: pluginName,
-		L:          L,
-		renderFn:   renderFn,
-		updateFn:   updateFn,
-		state:      make(map[string]any),
-		api:        api,
+		id:          id,
+		title:       title,
+		pluginName:  pluginName,
+		L:           L,
+		renderFn:    renderFn,
+		updateFn:    updateFn,
+		state:       make(map[string]any),
+		api:         api,
+		renderDirty: true,
 	}
 }
 
@@ -69,6 +95,12 @@ func (w *pluginWindow) Update(msg tea.Msg) (Window, tea.Cmd) {
 	if w.updateFn == nil {
 		return w, nil
 	}
+	if keyMsg, ok := msg.(tea.KeyMsg); ok {
+		w.keyMu.Lock()
+		w.pendingKeys = append(w.pendingKeys, keyMsg.String())
+		w.keyMu.Unlock()
+		w.renderDirty = true
+	}
 	return w, nil
 }
 
@@ -77,30 +109,76 @@ func (w *pluginWindow) View(width, height int, focused bool) string {
 		return fmt.Sprintf("[%s: no render function]", w.title)
 	}
 
-	L := w.L
-	top := L.GetTop()
-	defer L.SetTop(top)
+	w.renderMu.RLock()
+	cached := w.cachedRender
+	w.renderMu.RUnlock()
 
-	err := L.CallByParam(lua.P{
-		Fn:      w.renderFn,
-		NRet:    1,
-		Protect: true,
-	}, lua.LNumber(width), lua.LNumber(height))
-
-	if err != nil {
-		slog.Error("plugin render error", "plugin", w.pluginName, "window", w.id, "error", err)
-		w.api.sendPluginError(w.pluginName, err.Error(), "render")
-		return fmt.Sprintf("[render error: %s]", err.Error())
+	if width != w.lastWidth || height != w.lastHeight {
+		w.lastWidth = width
+		w.lastHeight = height
+		w.renderDirty = true
 	}
 
-	result := L.Get(-1)
-	if str, ok := result.(lua.LString); ok {
-		return string(str)
+	if cached == "" && w.renderFn != nil {
+		return fmt.Sprintf("[%s: loading...]", w.title)
 	}
-	if result == lua.LNil {
-		return ""
+
+	return cached
+}
+
+func (w *pluginWindow) triggerRender(resultCh chan<- pluginRenderMsg) {
+	if w.executor == nil || w.renderFn == nil || w.executor.unhealthy {
+		return
 	}
-	return fmt.Sprintf("[%v]", result)
+	w.renderDirty = false
+	width, height := w.lastWidth, w.lastHeight
+	windowID := w.id
+	pluginName := w.pluginName
+	renderTimeout := w.api.renderTimeout
+	errCh := w.api.errCh
+	callbackTimeout := w.api.callbackTimeout
+
+	w.keyMu.Lock()
+	keys := w.pendingKeys
+	w.pendingKeys = nil
+	w.keyMu.Unlock()
+
+	go func() {
+		if len(keys) > 0 && w.updateFn != nil {
+			for _, key := range keys {
+				w.executor.call(w.updateFn,
+					[]lua.LValue{lua.LString(key)},
+					0, callbackTimeout)
+			}
+		}
+
+		result, err := w.executor.call(w.renderFn,
+			[]lua.LValue{lua.LNumber(width), lua.LNumber(height)},
+			1, renderTimeout)
+		msg := pluginRenderMsg{windowID: windowID}
+		if err != nil {
+			msg.err = err
+			msg.content = fmt.Sprintf("[render error: %s]", err.Error())
+		} else if len(result.values) > 0 {
+			if str, ok := result.values[0].(lua.LString); ok {
+				msg.content = string(str)
+			}
+		}
+		if msg.err != nil && errCh != nil {
+			select {
+			case errCh <- PluginError{PluginName: pluginName, Error: msg.err.Error(), Source: "render", Timestamp: time.Now()}:
+			default:
+			}
+			w.executor.consecutiveFailures++
+			if w.executor.consecutiveFailures >= 3 {
+				w.executor.unhealthy = true
+			}
+		} else {
+			w.executor.consecutiveFailures = 0
+			w.executor.unhealthy = false
+		}
+		resultCh <- msg
+	}()
 }
 
 func NewPluginAPI() *PluginAPI {
@@ -111,6 +189,9 @@ func NewPluginAPI() *PluginAPI {
 		keybindCallbacks: make(map[string]func()),
 		pluginWindows:    make(map[string]*pluginWindow),
 		pluginKeybinds:   make(map[string]string),
+		executors:        make(map[string]*pluginExecutor),
+		renderResultCh:   make(chan pluginRenderMsg, 32),
+		dataCallbacks:    make(map[string][]luaCallback),
 	}
 }
 
@@ -140,6 +221,45 @@ func (api *PluginAPI) SetWindowChangeCallback(fn func()) {
 
 func (api *PluginAPI) SetErrorChannel(ch chan PluginError) {
 	api.errCh = ch
+}
+
+func (api *PluginAPI) SetTimeouts(render, callback, load time.Duration) {
+	api.renderTimeout = render
+	api.callbackTimeout = callback
+	api.loadTimeout = load
+}
+
+func (api *PluginAPI) setExecutor(pluginName string, exec *pluginExecutor) {
+	api.executors[pluginName] = exec
+	for _, pw := range api.pluginWindows {
+		if pw.pluginName == pluginName {
+			pw.executor = exec
+			if pw.renderFn != nil {
+				renderTimeout := api.renderTimeout
+				if renderTimeout == 0 {
+					renderTimeout = 50 * time.Millisecond
+				}
+				result, err := exec.call(pw.renderFn,
+					[]lua.LValue{lua.LNumber(0), lua.LNumber(0)},
+					1, renderTimeout)
+				if err == nil && len(result.values) > 0 {
+					if str, ok := result.values[0].(lua.LString); ok {
+						pw.renderMu.Lock()
+						pw.cachedRender = string(str)
+						pw.renderMu.Unlock()
+					}
+				}
+			}
+		}
+	}
+}
+
+func (api *PluginAPI) getExecutor(pluginName string) *pluginExecutor {
+	return api.executors[pluginName]
+}
+
+func (api *PluginAPI) RenderResultChannel() chan pluginRenderMsg {
+	return api.renderResultCh
 }
 
 func (api *PluginAPI) sendPluginError(pluginName, errMsg, source string) {
@@ -229,6 +349,39 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		}
 		return 0
 	}))
+	L.SetField(windowTable, "invalidate", L.NewFunction(func(L *lua.LState) int {
+		id := L.CheckString(1)
+		if pw, ok := api.pluginWindows[id]; ok {
+			pw.renderDirty = true
+		}
+		return 0
+	}))
+	L.SetField(windowTable, "get_content", L.NewFunction(func(L *lua.LState) int {
+		id := L.CheckString(1)
+		if id == "chat" && api.chat != nil {
+			api.chat.chatMu.RLock()
+			content := api.chat.renderMessages()
+			api.chat.chatMu.RUnlock()
+			L.Push(lua.LString(content))
+			return 1
+		}
+		if pw, ok := api.pluginWindows[id]; ok {
+			pw.renderMu.RLock()
+			content := pw.cachedRender
+			pw.renderMu.RUnlock()
+			L.Push(lua.LString(content))
+			return 1
+		}
+		if api.wm != nil {
+			if win := api.wm.Get(id); win != nil {
+				content := win.View(api.wm.width, api.wm.height, false)
+				L.Push(lua.LString(content))
+				return 1
+			}
+		}
+		L.Push(lua.LNil)
+		return 1
+	}))
 	L.SetField(lainTable, "window", windowTable)
 
 	chatTable := L.NewTable()
@@ -242,8 +395,12 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 			L.Push(L.NewTable())
 			return 1
 		}
+		api.chat.chatMu.RLock()
+		msgs := make([]ChatMessage, len(api.chat.messages))
+		copy(msgs, api.chat.messages)
+		api.chat.chatMu.RUnlock()
 		t := L.NewTable()
-		for i, msg := range api.chat.messages {
+		for i, msg := range msgs {
 			msgTable := L.NewTable()
 			L.SetField(msgTable, "role", lua.LString(msg.Role))
 			var content strings.Builder
@@ -289,11 +446,24 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		L.SetField(lainTable, "session", sessionTable)
 	}
 
+	agentTable := L.NewTable()
+	L.SetField(agentTable, "on_data", L.NewFunction(func(L *lua.LState) int {
+		fn := L.CheckFunction(1)
+		api.dataCallbacks[pluginName] = append(api.dataCallbacks[pluginName], luaCallback{L: L, Fn: fn})
+		return 0
+	}))
+	L.SetField(lainTable, "agent", agentTable)
+
 	stateTable := L.NewTable()
 	L.SetField(stateTable, "set", L.NewFunction(func(L *lua.LState) int {
 		key := L.CheckString(1)
 		val := L.CheckAny(2)
 		api.pluginState[pluginName][key] = luaToGo(val)
+		for _, pw := range api.pluginWindows {
+			if pw.pluginName == pluginName {
+				pw.renderDirty = true
+			}
+		}
 		return 0
 	}))
 	L.SetField(stateTable, "get", L.NewFunction(func(L *lua.LState) int {
@@ -327,12 +497,13 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		name := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		api.commandCallbacks[name] = func(arg string) {
-			top := L.GetTop()
-			defer L.SetTop(top)
-			if err := L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}, lua.LString(arg)); err != nil {
-				slog.Error("plugin command error", "command", name, "error", err)
-				api.sendPluginError(pluginName, fmt.Sprintf("command %q: %s", name, err.Error()), "command")
+			exec := api.getExecutor(pluginName)
+			if exec == nil {
+				return
 			}
+			exec.callAsync(fn,
+				[]lua.LValue{lua.LString(arg)},
+				0, api.callbackTimeout, api.errCh, pluginName, "command")
 		}
 		return 0
 	}))
@@ -343,17 +514,50 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		key := L.CheckString(1)
 		fn := L.CheckFunction(2)
 		api.keybindCallbacks[key] = func() {
-			top := L.GetTop()
-			defer L.SetTop(top)
-			if err := L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}); err != nil {
-				slog.Error("plugin keybind error", "key", key, "error", err)
-				api.sendPluginError(pluginName, fmt.Sprintf("keybind %q: %s", key, err.Error()), "keybind")
+			exec := api.getExecutor(pluginName)
+			if exec == nil {
+				return
 			}
+			exec.callAsync(fn, nil, 0, api.callbackTimeout, api.errCh, pluginName, "keybind")
 		}
 		api.pluginKeybinds[key] = pluginName
 		return 0
 	}))
 	L.SetField(lainTable, "keybind", keybindTable)
+
+	execTable := L.NewTable()
+	L.SetField(execTable, "exec", L.NewFunction(func(L *lua.LState) int {
+		cmdStr := L.CheckString(1)
+		timeout, cwd, env := parseExecOpts(L)
+		stdout, stderr, exitCode, err := runCommand(cmdStr, timeout, cwd, env)
+		pushExecResult(L, stdout, stderr, exitCode, err)
+		return 1
+	}))
+	L.SetField(execTable, "exec_async", L.NewFunction(func(L *lua.LState) int {
+		cmdStr := L.CheckString(1)
+		timeout, cwd, env := parseExecOpts(L)
+		callback := L.CheckFunction(3)
+		executor := api.executors[pluginName]
+		if executor == nil {
+			L.Push(lua.LNil)
+			return 1
+		}
+		go func() {
+			stdout, stderr, exitCode, err := runCommand(cmdStr, timeout, cwd, env)
+			select {
+			case executor.execResultCh <- execResultMsg{
+				callback: callback,
+				stdout:   stdout,
+				stderr:   stderr,
+				exitCode: exitCode,
+				err:      err,
+			}:
+			default:
+			}
+		}()
+		return 0
+	}))
+	L.SetField(lainTable, "exec", execTable)
 
 	L.SetGlobal("lain", lainTable)
 }
@@ -421,26 +625,41 @@ func (api *PluginAPI) luaWindowClose(id string) {
 
 func (api *PluginAPI) FireMessageCallbacks(role, text string) {
 	for plugin, callbacks := range api.messageCallbacks {
-		for _, cb := range callbacks {
-			L := cb.L
-			if L == nil {
-				continue
-			}
-			top := L.GetTop()
-			err := L.CallByParam(lua.P{Fn: cb.Fn, NRet: 0, Protect: true},
-				lua.LString(role), lua.LString(text))
-			L.SetTop(top)
-			if err != nil {
-				slog.Error("plugin message callback error", "plugin", plugin, "error", err)
-				api.sendPluginError(plugin, err.Error(), "callback")
-			}
+		exec := api.getExecutor(plugin)
+		if exec == nil {
+			continue
 		}
+		for _, cb := range callbacks {
+			fn := cb.Fn
+			exec.callAsync(fn,
+				[]lua.LValue{lua.LString(role), lua.LString(text)},
+				0, api.callbackTimeout, api.errCh, plugin, "callback")
+		}
+	}
+}
+
+func (api *PluginAPI) FireDataCallbacks(pluginName, data string) {
+	callbacks, ok := api.dataCallbacks[pluginName]
+	if !ok {
+		return
+	}
+	exec := api.getExecutor(pluginName)
+	if exec == nil {
+		return
+	}
+	for _, cb := range callbacks {
+		fn := cb.Fn
+		exec.callAsync(fn,
+			[]lua.LValue{lua.LString(data)},
+			0, api.callbackTimeout, api.errCh, pluginName, "on_data")
 	}
 }
 
 func (api *PluginAPI) ClearPlugin(pluginName string) {
 	delete(api.pluginState, pluginName)
 	delete(api.messageCallbacks, pluginName)
+	delete(api.executors, pluginName)
+	delete(api.dataCallbacks, pluginName)
 	for id, pw := range api.pluginWindows {
 		if pw.pluginName == pluginName {
 			api.luaWindowClose(id)
@@ -529,4 +748,72 @@ func getFunctionField(L *lua.LState, tbl *lua.LTable, key string) *lua.LFunction
 		return fn
 	}
 	return nil
+}
+
+func parseExecOpts(L *lua.LState) (timeout time.Duration, cwd string, env map[string]string) {
+	timeout = 30 * time.Second
+	if L.GetTop() >= 2 {
+		if opts, ok := L.Get(2).(*lua.LTable); ok {
+			if v := L.RawGet(opts, lua.LString("timeout")); v != lua.LNil {
+				if n, ok := v.(lua.LNumber); ok {
+					timeout = time.Duration(float64(n)) * time.Second
+				}
+			}
+			if v := L.RawGet(opts, lua.LString("cwd")); v != lua.LNil {
+				if s, ok := v.(lua.LString); ok {
+					cwd = string(s)
+				}
+			}
+			if v := L.RawGet(opts, lua.LString("env")); v != lua.LNil {
+				if t, ok := v.(*lua.LTable); ok {
+					env = make(map[string]string)
+					t.ForEach(func(k, lv lua.LValue) {
+						env[k.String()] = lv.String()
+					})
+				}
+			}
+		}
+	}
+	return
+}
+
+func runCommand(cmdStr string, timeout time.Duration, cwd string, env map[string]string) (stdout, stderr string, exitCode int, err error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdStr)
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	if env != nil {
+		for k, v := range env {
+			cmd.Env = append(cmd.Environ(), k+"="+v)
+		}
+	}
+	var stdoutBuf, stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+	err = cmd.Run()
+	stdout = stdoutBuf.String()
+	stderr = stderrBuf.String()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return stdout, "command timed out", -1, err
+		}
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+		return stdout, stderr, exitCode, err
+	}
+	return stdout, stderr, 0, nil
+}
+
+func pushExecResult(L *lua.LState, stdout, stderr string, exitCode int, err error) {
+	t := L.NewTable()
+	L.SetField(t, "stdout", lua.LString(stdout))
+	L.SetField(t, "stderr", lua.LString(stderr))
+	L.SetField(t, "exit_code", lua.LNumber(exitCode))
+	L.SetField(t, "success", lua.LBool(exitCode == 0 && err == nil))
+	L.Push(t)
 }

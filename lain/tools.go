@@ -118,11 +118,61 @@ var TodoTool = openai.Tool{
 	},
 }
 
+var PluginQueryTool = openai.Tool{
+	Type: openai.ToolTypeFunction,
+	Function: &openai.FunctionDefinition{
+		Name:        "plugin_query",
+		Description: "Query plugin state and data. List all plugins, read plugin window content, or read plugin state.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"action": map[string]any{
+					"type":        "string",
+					"description": "The action to perform",
+					"enum":        []string{"list", "window", "state"},
+				},
+				"plugin": map[string]any{
+					"type":        "string",
+					"description": "Plugin name (required for 'window' and 'state' actions)",
+				},
+				"window_id": map[string]any{
+					"type":        "string",
+					"description": "Window ID (required for 'window' action)",
+				},
+			},
+			"required": []string{"action"},
+		},
+	},
+}
+
+var PluginSendTool = openai.Tool{
+	Type: openai.ToolTypeFunction,
+	Function: &openai.FunctionDefinition{
+		Name:        "plugin_send",
+		Description: "Send data to a plugin's on_data handler. The plugin must have registered a handler via lain.agent.on_data().",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"plugin": map[string]any{
+					"type":        "string",
+					"description": "Plugin name to send data to",
+				},
+				"data": map[string]any{
+					"type":        "string",
+					"description": "Arbitrary string data to send (typically JSON)",
+				},
+			},
+			"required": []string{"plugin", "data"},
+		},
+	},
+}
+
 type ToolRegistry struct {
 	builtinTools []openai.Tool
 	mcpTools     []openai.Tool
 	mcpManager   *MCPManager
 	todoStore    *TodoStore
+	pluginAPI    *PluginAPI
 }
 
 func NewToolRegistry(mgr *MCPManager) *ToolRegistry {
@@ -139,6 +189,10 @@ func (r *ToolRegistry) AddBuiltinTool(tool openai.Tool) {
 
 func (r *ToolRegistry) SetTodoStore(store *TodoStore) {
 	r.todoStore = store
+}
+
+func (r *ToolRegistry) SetPluginAPI(api *PluginAPI) {
+	r.pluginAPI = api
 }
 
 func (r *ToolRegistry) GetTodoStore() *TodoStore {
@@ -158,6 +212,12 @@ func (r *ToolRegistry) ExecuteTool(name string, args json.RawMessage) (string, e
 	}
 	if name == "todo" {
 		return r.executeTodo(args)
+	}
+	if name == "plugin_query" {
+		return r.executePluginQuery(args)
+	}
+	if name == "plugin_send" {
+		return r.executePluginSend(args)
 	}
 	serverName, toolName, err := r.mcpManager.ParseToolName(name)
 	if err != nil {
@@ -248,4 +308,96 @@ func (r *ToolRegistry) executeTodo(args json.RawMessage) (string, error) {
 	default:
 		return "", fmt.Errorf("unknown action: %s", a.Action)
 	}
+}
+
+type pluginQueryArgs struct {
+	Action   string `json:"action"`
+	Plugin   string `json:"plugin"`
+	WindowID string `json:"window_id"`
+}
+
+func (r *ToolRegistry) executePluginQuery(args json.RawMessage) (string, error) {
+	var a pluginQueryArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("parsing args: %w", err)
+	}
+	if r.pluginAPI == nil {
+		return "", fmt.Errorf("plugin system not initialized")
+	}
+
+	switch a.Action {
+	case "list":
+		var items []string
+		for name, exec := range r.pluginAPI.executors {
+			if exec == nil {
+				continue
+			}
+			windows := []string{}
+			for id, pw := range r.pluginAPI.pluginWindows {
+				if pw.pluginName == name {
+					windows = append(windows, fmt.Sprintf("%s (%s)", id, pw.title))
+				}
+			}
+			if len(windows) > 0 {
+				items = append(items, fmt.Sprintf("%s: windows=[%s]", name, strings.Join(windows, ", ")))
+			} else {
+				items = append(items, name)
+			}
+		}
+		if len(items) == 0 {
+			return "No plugins loaded", nil
+		}
+		return strings.Join(items, "\n"), nil
+	case "window":
+		if a.WindowID == "" {
+			return "", fmt.Errorf("window_id is required for window action")
+		}
+		pw, ok := r.pluginAPI.pluginWindows[a.WindowID]
+		if !ok {
+			return "", fmt.Errorf("window %q not found", a.WindowID)
+		}
+		pw.renderMu.RLock()
+		content := pw.cachedRender
+		pw.renderMu.RUnlock()
+		if content == "" {
+			return "[empty]", nil
+		}
+		return content, nil
+	case "state":
+		if a.Plugin == "" {
+			return "", fmt.Errorf("plugin is required for state action")
+		}
+		state, ok := r.pluginAPI.pluginState[a.Plugin]
+		if !ok {
+			return "", fmt.Errorf("plugin %q not found", a.Plugin)
+		}
+		data, err := json.Marshal(state)
+		if err != nil {
+			return "", fmt.Errorf("marshaling state: %w", err)
+		}
+		return string(data), nil
+	default:
+		return "", fmt.Errorf("unknown action: %s", a.Action)
+	}
+}
+
+type pluginSendArgs struct {
+	Plugin string `json:"plugin"`
+	Data   string `json:"data"`
+}
+
+func (r *ToolRegistry) executePluginSend(args json.RawMessage) (string, error) {
+	var a pluginSendArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("parsing args: %w", err)
+	}
+	if r.pluginAPI == nil {
+		return "", fmt.Errorf("plugin system not initialized")
+	}
+	callbacks, ok := r.pluginAPI.dataCallbacks[a.Plugin]
+	if !ok || len(callbacks) == 0 {
+		return "", fmt.Errorf("plugin %q has no data handler registered", a.Plugin)
+	}
+	r.pluginAPI.FireDataCallbacks(a.Plugin, a.Data)
+	return fmt.Sprintf("Data sent to plugin %q (%d handler(s))", a.Plugin, len(callbacks)), nil
 }

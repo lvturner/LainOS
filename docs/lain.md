@@ -254,7 +254,7 @@ sub_agent:
 
 Plugins are Lua scripts that extend lain's UI at runtime. They live at `~/.config/lain/plugins/*.lua` and are **hot-reloaded** on file change — no restart needed.
 
-Each plugin runs in an isolated Lua 5.1 sandbox. The standard `os`, `io`, `debug`, and `package` libraries are removed; only controlled APIs via the `lain.*` table are available.
+Each plugin runs in a Lua 5.1 state with the full standard library: `string`, `table`, `math`, `coroutine`, `io`, `os`, `debug`, `package`. The `lain.*` API provides TUI integration; standard library functions are available for filesystem and system access.
 
 ### Quick example
 
@@ -330,9 +330,18 @@ The `render` function receives `(width, height)` and must return a string. The `
 |---|---|
 | `register(key, cb)` | Register a normal-mode keybinding. `cb()` is called when the key is pressed in normal mode. |
 
+#### lain.exec
+
+| Function | Description |
+|---|---|
+| `exec(cmd, opts?)` | Run command synchronously. Returns `{ stdout, stderr, exit_code, success }`. Options: `{ timeout=30, cwd="", env={} }` |
+| `exec_async(cmd, opts, callback)` | Run command asynchronously. `callback(result)` called on completion. |
+
+Render functions have a 50ms timeout — use `exec_async` for commands in render. Callbacks have a 5s timeout — `exec` is fine for fast commands.
+
 ### Available Lua libraries
 
-Plugins can use: `string`, `table`, `math`, `coroutine`. The `os`, `io`, `debug`, and `package` libraries are **not** available.
+Plugins have access to the full Lua 5.1 standard library: `string`, `table`, `math`, `coroutine`, `io`, `os`, `debug`, `package`. Use `io.popen` or `os.execute` for system commands. For reliable command execution in render/callback contexts, use `lain.exec()` or `lain.exec_async()`.
 
 ### Plugin directory
 

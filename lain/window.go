@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +27,7 @@ type chatWindow struct {
 	newBelow     bool
 	chatWidth    int
 	height       int
+	chatMu       sync.RWMutex
 }
 
 func newChatWindow() *chatWindow {
@@ -93,6 +95,8 @@ func (w *chatWindow) fullRedraw() {
 }
 
 func (w *chatWindow) renderMessages() string {
+	w.chatMu.RLock()
+	defer w.chatMu.RUnlock()
 	var b strings.Builder
 	for i := range w.messages {
 		msg := &w.messages[i]

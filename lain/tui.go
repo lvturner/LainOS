@@ -148,6 +148,11 @@ func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model 
 	pluginDir := filepath.Join(home, ".config", "lain", "plugins")
 	pluginLoader := NewPluginLoader(pluginDir, pluginAPI)
 	pluginAPI.SetErrorChannel(pluginLoader.ErrorChannel())
+	pluginAPI.SetTimeouts(profile.Config.Plugins.RenderTimeout, profile.Config.Plugins.CallbackTimeout, profile.Config.Plugins.LoadTimeout)
+
+	registry.SetPluginAPI(pluginAPI)
+	registry.AddBuiltinTool(PluginQueryTool)
+	registry.AddBuiltinTool(PluginSendTool)
 
 	m := model{
 		profileName:    profileName,
@@ -190,13 +195,15 @@ func (m *model) LoadSessionByID(sessionID string) error {
 func (m model) Init() tea.Cmd {
 	var cmds []tea.Cmd
 	cmds = append(cmds, func() tea.Msg {
-		if err := m.pluginLoader.Start(); err != nil {
+		if err := m.pluginLoader.Start(m.profile.Config.Plugins.Enabled); err != nil {
 			slog.Error("plugin loader start failed", "error", err)
 		}
 		return nil
 	})
 	cmds = append(cmds, waitForPluginEvent(m.pluginLoader.Events()))
 	cmds = append(cmds, waitForPluginError(m.pluginLoader.Errors()))
+	cmds = append(cmds, pluginRenderTick())
+	cmds = append(cmds, waitForPluginRenderResult(m.pluginAPI.RenderResultChannel()))
 	return tea.Batch(cmds...)
 }
 
@@ -273,6 +280,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, notificationTick()
 		}
 		return m, nil
+	case pluginRenderMsg:
+		pw := m.pluginAPI.pluginWindows[msg.windowID]
+		if pw != nil {
+			pw.renderMu.Lock()
+			pw.cachedRender = msg.content
+			pw.renderMu.Unlock()
+		}
+		return m, waitForPluginRenderResult(m.pluginAPI.RenderResultChannel())
+	case pluginRenderTickMsg:
+		for _, pw := range m.pluginAPI.pluginWindows {
+			if pw.renderDirty && pw.executor != nil {
+				pw.triggerRender(m.pluginAPI.RenderResultChannel())
+			}
+		}
+		return m, pluginRenderTick()
 	}
 
 	var cmd tea.Cmd
@@ -478,6 +500,14 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.clearStatus()
 		}
 		return m, nil
+	}
+
+	if focusedID := m.wm.FocusedID(); focusedID != "" && focusedID != "chat" {
+		if win := m.wm.Get(focusedID); win != nil {
+			if pw, ok := win.(*pluginWindow); ok && pw.updateFn != nil {
+				pw.Update(msg)
+			}
+		}
 	}
 
 	keybinds := m.pluginAPI.GetKeybindCallbacks()
@@ -703,6 +733,35 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 			} else {
 				m.pluginLoader.ReloadAll()
 				m.statusMsg = "All plugins reloaded"
+			}
+		} else if len(parts) >= 2 && parts[1] == "start" {
+			if len(parts) >= 3 && parts[2] != "" {
+				name := strings.TrimSpace(parts[2])
+				if !strings.HasSuffix(name, ".lua") {
+					name += ".lua"
+				}
+				m.pluginLoader.Load(name)
+				pluginName := strings.TrimSuffix(name, ".lua")
+				if m.pluginLoader.IsLoaded(pluginName) {
+					m.statusMsg = "Plugin started: " + pluginName
+				} else {
+					m.statusMsg = "Failed to start plugin: " + pluginName
+				}
+			} else {
+				m.pluginLoader.ReloadAll()
+				m.statusMsg = "All plugins started"
+			}
+		} else if len(parts) >= 2 && parts[1] == "stop" {
+			if len(parts) >= 3 && parts[2] != "" {
+				name := strings.TrimSpace(parts[2])
+				filename := name
+				if !strings.HasSuffix(filename, ".lua") {
+					filename += ".lua"
+				}
+				m.pluginLoader.Unload(filename)
+				m.statusMsg = "Plugin stopped: " + name
+			} else {
+				m.statusMsg = "Usage: /plugins stop <name>"
 			}
 		} else {
 			plugins := m.pluginLoader.ListPlugins()
@@ -1375,6 +1434,22 @@ func waitForPluginError(ch <-chan PluginError) tea.Cmd {
 	}
 }
 
+func pluginRenderTick() tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
+		return pluginRenderTickMsg(t)
+	})
+}
+
+func waitForPluginRenderResult(ch chan pluginRenderMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 func waitForSubAgentEvent(agentID string, ch <-chan StreamEvent) tea.Cmd {
 	return func() tea.Msg {
 		e, ok := <-ch
@@ -1437,7 +1512,7 @@ If you receive multiple errors, fix them one at a time.
 Available tools: run_command (use to cat, sed, or rewrite files).
 Plugin directory: ~/.config/lain/plugins/
 Plugin extension: .lua
-Available Lua libraries: string, table, math, coroutine (no os, io, debug, package)
+Available Lua libraries: string, table, math, coroutine, io, os, package (no debug)
 Plugin API: lain.window, lain.chat, lain.session, lain.state, lain.log, lain.command, lain.keybind`
 }
 
