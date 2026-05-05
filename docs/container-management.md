@@ -88,9 +88,37 @@ Note: `gateway.yaml` changes are hot-reloaded — you don't need to restart the 
 | Host mount | Container path | Purpose |
 |---|---|---|
 | `./.data/home/` | `/home/lainos/` | Entire home directory (config, workspace, dotfiles) |
+| `./.data/snapshots/` | `/snapshots` | Btrfs snapshot storage |
 | `nix` (named volume) | `/nix` | Nix store |
 
 The `:Z` SELinux label is required on bind mounts for podman — this is already configured in `compose.yaml`.
+
+## Snapshots
+
+The home directory is automatically snapshotted using btrfs when files change. Requires a one-time migration to convert `.data/home` to a btrfs subvolume (see [snapshots.md](snapshots.md)).
+
+```bash
+# List snapshots
+ls /snapshots/
+
+# Restore a file from a snapshot
+cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/some-file ~/some-file
+
+# Restore a directory
+cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/.config ~/.config
+
+# Manual snapshot
+/usr/local/bin/home-snapshot.sh
+
+# Change snapshot interval
+vim ~/config/snapshot.conf
+systemctl --user restart home-snapshot
+
+# Trigger cleanup immediately
+systemctl --user start home-snapshot-cleanup
+```
+
+See **[snapshots.md](snapshots.md)** for full setup, configuration, and troubleshooting.
 
 ## Clean Rebuild
 

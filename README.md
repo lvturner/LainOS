@@ -10,6 +10,7 @@ Agent frameworks like [Hermes](https://github.com/nousresearch/hermes-agent) and
 - **[wh-gateway](docs/wh-gateway.md)** — HTTP webhook gateway for deterministic workflows (no LLM required)
 - **[cloudflared](docs/cloudflare-tunnel.md)** — Cloudflare tunnel for external ingress
 - **[camofox](docs/camofox.md)** — Anti-detection headless browser server for AI agents
+- **[snapshots](docs/snapshots.md)** — Automatic btrfs snapshots of the home directory, triggered by file changes with tiered retention
 
 ## Quick Start
 
@@ -61,6 +62,7 @@ ssh -p 2222 lainos@localhost
 ```
 install.sh        → One-shot curl-able installer
 config/           → gateway.yaml, cloudflared.yaml, lain profiles (bind-mounted)
+.data/snapshots/  → Home directory snapshots (bind-mounted)
 workspace/        → Handler scripts (bind-mounted)
 local/            → ~/.local for the lainos user (bind-mounted)
 docs/             → Documentation (COPY'd into container at /home/lainos/docs/)
@@ -132,3 +134,9 @@ podman-compose down             # Stop
 All commands work with `docker compose` as a drop-in replacement if you don't have podman installed.
 
 See **[docs/container-management.md](docs/container-management.md)** for systemd service management, volume mounts, and container lifecycle.
+
+## Snapshots
+
+The home directory is snapshotted automatically using btrfs copy-on-write snapshots. Snapshots are triggered by file changes (debounced to a configurable interval, default: hourly) and pruned automatically with a tiered retention policy (30 days). Restore any file or directory from a snapshot using standard file copy.
+
+See **[docs/snapshots.md](docs/snapshots.md)** for setup, configuration, restore, and management.

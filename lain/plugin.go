@@ -18,6 +18,13 @@ type pluginEventMsg struct {
 	filename string
 }
 
+type PluginError struct {
+	PluginName string
+	Error      string
+	Source     string
+	Timestamp  time.Time
+}
+
 type PluginLoader struct {
 	mu       sync.Mutex
 	api      *PluginAPI
@@ -25,6 +32,8 @@ type PluginLoader struct {
 	dir      string
 	stopCh   chan struct{}
 	eventCh  chan pluginEventMsg
+	errCh    chan PluginError
+	loaded   map[string]bool
 	started  bool
 }
 
@@ -34,6 +43,34 @@ func NewPluginLoader(dir string, api *PluginAPI) *PluginLoader {
 		dir:     dir,
 		stopCh:  make(chan struct{}),
 		eventCh: make(chan pluginEventMsg, 20),
+		errCh:   make(chan PluginError, 16),
+		loaded:  make(map[string]bool),
+	}
+}
+
+func (pl *PluginLoader) Errors() <-chan PluginError {
+	return pl.errCh
+}
+
+func (pl *PluginLoader) ErrorChannel() chan PluginError {
+	return pl.errCh
+}
+
+func (pl *PluginLoader) IsLoaded(name string) bool {
+	pl.mu.Lock()
+	defer pl.mu.Unlock()
+	return pl.loaded[name]
+}
+
+func (pl *PluginLoader) sendError(pluginName, errMsg, source string) {
+	select {
+	case pl.errCh <- PluginError{
+		PluginName: pluginName,
+		Error:      errMsg,
+		Source:     source,
+		Timestamp:  time.Now(),
+	}:
+	default:
 	}
 }
 
@@ -116,15 +153,20 @@ func (pl *PluginLoader) loadPluginLocked(filename string) {
 	if err != nil {
 		slog.Error("plugin load error", "plugin", name, "error", err)
 		L.Close()
+		pl.loaded[name] = false
+		pl.sendError(name, err.Error(), "load")
 		return
 	}
 
 	if err := L.DoString(string(data)); err != nil {
 		slog.Error("plugin exec error", "plugin", name, "error", err)
 		L.Close()
+		pl.loaded[name] = false
+		pl.sendError(name, err.Error(), "exec")
 		return
 	}
 
+	pl.loaded[name] = true
 	slog.Info("plugin loaded", "name", name)
 }
 
@@ -242,9 +284,13 @@ func newSandboxedState() *lua.LState {
 	L := lua.NewState(lua.Options{
 		SkipOpenLibs: true,
 	})
+	lua.OpenBase(L)
 	lua.OpenString(L)
 	lua.OpenTable(L)
 	lua.OpenMath(L)
 	lua.OpenCoroutine(L)
+	lua.OpenIo(L)
+	lua.OpenOs(L)
+	lua.OpenPackage(L)
 	return L
 }

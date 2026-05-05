@@ -40,6 +40,15 @@ type titleGeneratedMsg struct {
 
 type statusClearMsg struct{}
 
+type pluginErrorMsg struct {
+	err PluginError
+}
+
+type subAgentEventMsg struct {
+	agentID string
+	event   StreamEvent
+}
+
 type editorMode int
 
 const (
@@ -92,6 +101,11 @@ type model struct {
 	todo         *todoWindow
 	pluginAPI    *PluginAPI
 	pluginLoader *PluginLoader
+
+	subAgentMgr   *SubAgentManager
+	notifications *NotificationManager
+	pendingFixErr *PluginError
+	fixAgentID    string
 }
 
 func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model {
@@ -133,23 +147,27 @@ func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model 
 	home, _ := os.UserHomeDir()
 	pluginDir := filepath.Join(home, ".config", "lain", "plugins")
 	pluginLoader := NewPluginLoader(pluginDir, pluginAPI)
+	pluginAPI.SetErrorChannel(pluginLoader.ErrorChannel())
 
-	return model{
-		profileName:  profileName,
-		profile:      profile,
-		registry:     registry,
-		llmClient:    llmClient,
-		textarea:     ta,
-		spinner:      sp,
+	m := model{
+		profileName:    profileName,
+		profile:        profile,
+		registry:       registry,
+		llmClient:      llmClient,
+		textarea:       ta,
+		spinner:        sp,
 		currentSession: session,
 		titleGenPending: true,
-		mode:         insertMode,
-		wm:           wm,
-		chat:         chat,
-		todo:         todo,
-		pluginAPI:    pluginAPI,
-		pluginLoader: pluginLoader,
+		mode:           insertMode,
+		wm:             wm,
+		chat:           chat,
+		todo:           todo,
+		pluginAPI:      pluginAPI,
+		pluginLoader:   pluginLoader,
+		notifications:  NewNotificationManager(),
 	}
+	m.subAgentMgr = NewSubAgentManager(&m)
+	return m
 }
 
 func (m *model) LoadSessionByID(sessionID string) error {
@@ -178,6 +196,7 @@ func (m model) Init() tea.Cmd {
 		return nil
 	})
 	cmds = append(cmds, waitForPluginEvent(m.pluginLoader.Events()))
+	cmds = append(cmds, waitForPluginError(m.pluginLoader.Errors()))
 	return tea.Batch(cmds...)
 }
 
@@ -213,10 +232,47 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.action {
 		case "reload":
 			m.pluginLoader.Load(msg.filename)
+			name := strings.TrimSuffix(msg.filename, filepath.Ext(msg.filename))
+			if m.pluginLoader.IsLoaded(name) && m.subAgentMgr.HasActive(m.fixAgentID) {
+				m.subAgentMgr.EnqueueMessage(m.fixAgentID,
+					fmt.Sprintf("Plugin %q reloaded successfully after your fix.", name))
+				m.notifications.Add(fmt.Sprintf("✓ Plugin %q fixed and reloaded", name), 5*time.Second)
+			}
 		case "remove":
 			m.pluginLoader.Unload(msg.filename)
 		}
 		return m, waitForPluginEvent(m.pluginLoader.Events())
+	case pluginErrorMsg:
+		if m.profile.Config.SubAgent.AutoFix {
+			m.spawnFixAgent(msg.err)
+		} else {
+			m.pendingFixErr = &msg.err
+			m.mode = normalMode
+			m.textarea.Blur()
+		}
+		return m, waitForPluginError(m.pluginLoader.Errors())
+	case subAgentEventMsg:
+		agent := m.subAgentMgr.agents[msg.agentID]
+		if agent != nil && agent.window != nil {
+			agent.window.AppendEvent(msg.event)
+			if msg.event.Type == "done" || msg.event.Type == "error" {
+				agent.window.streaming = false
+				agent.window.done = true
+			}
+		}
+		if msg.event.Type == "done" || msg.event.Type == "error" || msg.event.Type == "cancelled" {
+			return m, nil
+		}
+		if agent != nil && agent.streamCh != nil {
+			return m, waitForSubAgentEvent(msg.agentID, agent.streamCh)
+		}
+		return m, nil
+	case notificationExpireMsg:
+		m.notifications.Expire()
+		if m.notifications.HasActive() {
+			return m, notificationTick()
+		}
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -258,6 +314,7 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.autoSave()
+		m.subAgentMgr.StopAll()
 		return m, tea.Quit
 	case "ctrl+l":
 		m.fullRedraw()
@@ -408,6 +465,26 @@ func (m model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.pendingFixErr != nil {
+		switch key {
+		case "f", "F":
+			err := *m.pendingFixErr
+			m.pendingFixErr = nil
+			m.spawnFixAgent(err)
+			m.mode = insertMode
+			m.textarea.Focus()
+			return m, nil
+		case "esc", "i":
+			m.pendingFixErr = nil
+			m.mode = insertMode
+			m.textarea.Focus()
+			m.statusMsg = "Plugin error dismissed"
+			m.refreshView()
+			return m, m.clearStatus()
+		}
+		return m, nil
+	}
+
 	keybinds := m.pluginAPI.GetKeybindCallbacks()
 	if fn, ok := keybinds[key]; ok {
 		fn()
@@ -419,46 +496,96 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = insertMode
 		m.textarea.Focus()
 		return m, nil
+	case "h", "left":
+		m.wm.FocusSpatial(FocusLeft)
+		return m, nil
 	case "j", "down":
-		m.wm.FocusNext()
+		m.wm.FocusSpatial(FocusDown)
 		return m, nil
 	case "k", "up":
-		m.wm.FocusPrev()
-		return m, nil
-	case "h", "left":
-		m.wm.FocusPrev()
+		m.wm.FocusSpatial(FocusUp)
 		return m, nil
 	case "l", "right":
-		m.wm.FocusNext()
+		m.wm.FocusSpatial(FocusRight)
 		return m, nil
-	case "H":
-		focused := m.wm.FocusedID()
-		if focused != "" && focused != "chat" {
-			m.wm.Remove(focused)
-			m.wm.AddWithSplit(m.wm.FocusedID(), SplitHorizontal, &blankWindow{id: focused + "-h", title: "Split"}, 0)
-			m.wm.SetSize(m.width, m.wmHeight())
+	case "ctrl+left":
+		if m.wm.HasFloating(m.wm.FocusedID()) {
+			m.wm.MoveFloating(m.wm.FocusedID(), -2, 0)
+		} else {
+			m.wm.MoveFocused(FocusLeft)
+			m.resizeWM()
 		}
 		return m, nil
-	case "V":
+	case "ctrl+right":
+		if m.wm.HasFloating(m.wm.FocusedID()) {
+			m.wm.MoveFloating(m.wm.FocusedID(), 2, 0)
+		} else {
+			m.wm.MoveFocused(FocusRight)
+			m.resizeWM()
+		}
+		return m, nil
+	case "ctrl+up":
+		if m.wm.HasFloating(m.wm.FocusedID()) {
+			m.wm.MoveFloating(m.wm.FocusedID(), 0, -1)
+		} else {
+			m.wm.MoveFocused(FocusUp)
+			m.resizeWM()
+		}
+		return m, nil
+	case "ctrl+down":
+		if m.wm.HasFloating(m.wm.FocusedID()) {
+			m.wm.MoveFloating(m.wm.FocusedID(), 0, 1)
+		} else {
+			m.wm.MoveFocused(FocusDown)
+			m.resizeWM()
+		}
+		return m, nil
+	case "s":
 		focused := m.wm.FocusedID()
-		if focused != "" && focused != "chat" {
-			m.wm.Remove(focused)
-			m.wm.AddWithSplit(m.wm.FocusedID(), SplitVertical, &blankWindow{id: focused + "-v", title: "Split"}, 0)
-			m.wm.SetSize(m.width, m.wmHeight())
+		if focused != "" {
+			scratch := &blankWindow{id: "scratch-" + focused, title: "Scratch"}
+			m.wm.AddWithSplit(focused, SplitHorizontal, scratch, 0)
+			m.resizeWM()
+		}
+		return m, nil
+	case "v":
+		focused := m.wm.FocusedID()
+		if focused != "" {
+			scratch := &blankWindow{id: "scratch-" + focused, title: "Scratch"}
+			m.wm.AddWithSplit(focused, SplitVertical, scratch, 0)
+			m.resizeWM()
 		}
 		return m, nil
 	case "x":
 		focused := m.wm.FocusedID()
 		if focused != "" && focused != "chat" {
+			m.subAgentMgr.Stop(focused)
 			m.wm.Remove(focused)
-			m.wm.SetSize(m.width, m.wmHeight())
+			m.resizeWM()
 		}
+		return m, nil
+	case "X":
+		windows := m.wm.ListWindows()
+		for _, id := range windows {
+			if id != "chat" {
+				m.subAgentMgr.Stop(id)
+				m.wm.Remove(id)
+			}
+		}
+		m.resizeWM()
 		return m, nil
 	case "f":
 		focused := m.wm.FocusedID()
 		if focused != "" && focused != "chat" {
 			if m.wm.HasFloating(focused) {
+				win := m.wm.Get(focused)
 				m.wm.RemoveFloating(focused)
+				targetID := m.wm.FocusedID()
+				if targetID == "" || targetID == focused {
+					targetID = "chat"
+				}
+				m.wm.AddWithSplit(targetID, SplitVertical, win, 0)
+				m.resizeWM()
 			} else {
 				win := m.wm.Get(focused)
 				if win != nil {
@@ -468,6 +595,7 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					x := (m.width - w) / 2
 					y := (m.wmHeight() - h) / 2
 					m.wm.AddFloating(win, x, y, w, h)
+					m.resizeWM()
 				}
 			}
 		}
@@ -478,12 +606,22 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "-":
 		m.wm.ResizeFocused(-0.05)
 		return m, nil
+	case "b":
+		m.wm.ToggleBorders()
+		m.resizeWM()
+		return m, nil
+	case "z":
+		m.wm.ToggleZoom()
+		return m, nil
+	case "=":
+		m.wm.Equalize()
+		return m, nil
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
 		idx := int(key[0] - '1')
 		m.wm.FocusByIndex(idx)
 		return m, nil
 	case "?":
-		m.statusMsg = "hjkl:focus H:hsplit V:vsplit x:close f:float +/-:resize 1-9:goto Esc:insert"
+		m.statusMsg = "hjkl:focus x:close f:float +/-:resize b:borders z:zoom =:equalize s:hsplit v:vsplit 1-9:goto Esc:insert"
 		m.refreshView()
 		return m, m.clearStatus()
 	}
@@ -498,6 +636,7 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 	switch cmd {
 	case "/quit", "/exit":
 		m.autoSave()
+		m.subAgentMgr.StopAll()
 		return m, tea.Quit
 	case "/new":
 		m.autoSave()
@@ -611,7 +750,11 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 		if m.wm.HasFloating(id) {
 			m.wm.RemoveFloating(id)
-			m.wm.Add(win)
+			targetID := m.wm.FocusedID()
+			if targetID == "" || targetID == id {
+				targetID = "chat"
+			}
+			m.wm.AddWithSplit(targetID, SplitVertical, win, 0)
 			m.wm.SetSize(m.width, m.wmHeight())
 			m.statusMsg = "Window tiled: " + id
 		} else {
@@ -696,6 +839,12 @@ func (m model) handleSessionPicker(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.action {
 		case "reload":
 			m.pluginLoader.Load(msg.filename)
+			name := strings.TrimSuffix(msg.filename, filepath.Ext(msg.filename))
+			if m.pluginLoader.IsLoaded(name) && m.subAgentMgr.HasActive(m.fixAgentID) {
+				m.subAgentMgr.EnqueueMessage(m.fixAgentID,
+					fmt.Sprintf("Plugin %q reloaded successfully after your fix.", name))
+				m.notifications.Add(fmt.Sprintf("✓ Plugin %q fixed and reloaded", name), 5*time.Second)
+			}
 		case "remove":
 			m.pluginLoader.Unload(msg.filename)
 		}
@@ -735,6 +884,12 @@ func (m model) handleQuestion(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.action {
 		case "reload":
 			m.pluginLoader.Load(msg.filename)
+			name := strings.TrimSuffix(msg.filename, filepath.Ext(msg.filename))
+			if m.pluginLoader.IsLoaded(name) && m.subAgentMgr.HasActive(m.fixAgentID) {
+				m.subAgentMgr.EnqueueMessage(m.fixAgentID,
+					fmt.Sprintf("Plugin %q reloaded successfully after your fix.", name))
+				m.notifications.Add(fmt.Sprintf("✓ Plugin %q fixed and reloaded", name), 5*time.Second)
+			}
 		case "remove":
 			m.pluginLoader.Unload(msg.filename)
 		}
@@ -819,10 +974,18 @@ func (m model) View() string {
 	}
 
 	var statusBar string
-	if m.mode == normalMode {
-		statusBar = normalModeStyle.Render("  -- NORMAL --")
+	if m.pendingFixErr != nil {
+		truncErr := m.pendingFixErr.Error
+		if len(truncErr) > 60 {
+			truncErr = truncErr[:60] + "..."
+		}
+		statusBar = errorStyle.Render(fmt.Sprintf(
+			"⚠ plugin %q: %s — F:fix  Esc:dismiss",
+			m.pendingFixErr.PluginName, truncErr))
 	} else if m.statusMsg != "" {
 		statusBar = statusStyle.Render("  " + m.statusMsg)
+	} else if m.mode == normalMode {
+		statusBar = normalModeStyle.Render("  -- NORMAL --")
 	} else if m.streaming {
 		statusBar = statusStyle.Render("  " + m.spinner.View() + " thinking...")
 	} else {
@@ -839,7 +1002,12 @@ func (m model) View() string {
 		parts = append(parts, scrollIndicatorStyle.Render("  ↓ new messages (G to jump)"))
 	}
 	parts = append(parts, sep, statusBar, inputArea)
-	return lipgloss.JoinVertical(lipgloss.Left, parts...)
+	result := lipgloss.JoinVertical(lipgloss.Left, parts...)
+	result = m.wm.FloatingView(result, m.width)
+	if m.notifications.HasActive() {
+		result = m.notifications.Render(result, m.width)
+	}
+	return result
 }
 
 func (m *model) finalizeLastContent() {
@@ -1195,6 +1363,82 @@ func waitForPluginEvent(ch <-chan pluginEventMsg) tea.Cmd {
 		}
 		return msg
 	}
+}
+
+func waitForPluginError(ch <-chan PluginError) tea.Cmd {
+	return func() tea.Msg {
+		err, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return pluginErrorMsg{err: err}
+	}
+}
+
+func waitForSubAgentEvent(agentID string, ch <-chan StreamEvent) tea.Cmd {
+	return func() tea.Msg {
+		e, ok := <-ch
+		if !ok {
+			return subAgentEventMsg{agentID: agentID, event: StreamEvent{Type: "done"}}
+		}
+		return subAgentEventMsg{agentID: agentID, event: e}
+	}
+}
+
+func (m *model) spawnFixAgent(pluginErr PluginError) {
+	if m.subAgentMgr.HasActive(m.fixAgentID) {
+		m.subAgentMgr.EnqueueMessage(m.fixAgentID,
+			fmt.Sprintf("New plugin error:\nPlugin: %s\nError: %s\nSource: %s",
+				pluginErr.PluginName, pluginErr.Error, pluginErr.Source))
+		m.notifications.Add(
+			fmt.Sprintf("Error queued for plugin %q", pluginErr.PluginName),
+			5*time.Second)
+		return
+	}
+
+	profileName := m.profile.Config.SubAgent.Profile
+	if profileName == "" {
+		profileName = m.profileName
+	}
+
+	agent, err := m.subAgentMgr.Spawn(SubAgentOpts{
+		ID:           "fix-plugins",
+		Title:        "Plugin Fix Agent",
+		ProfileName:  profileName,
+		SystemPrompt: buildFixAgentPrompt(),
+		InitialMsg:   fmt.Sprintf("Plugin %q failed with error: %s\nRead the file and fix it.",
+			pluginErr.PluginName, pluginErr.Error),
+	})
+	if err != nil {
+		m.statusMsg = "Failed to spawn fix agent: " + err.Error()
+		m.refreshView()
+		return
+	}
+
+	m.fixAgentID = agent.id
+	m.subAgentMgr.SetFixAgentID(agent.id)
+	m.wm.SetFocused("chat")
+	m.notifications.Add(
+		fmt.Sprintf("Fix agent spawned for plugin %q", pluginErr.PluginName),
+		5*time.Second)
+}
+
+func buildFixAgentPrompt() string {
+	return `You are a plugin debugger for the lain TUI application.
+
+You fix Lua plugin errors. When you receive a plugin error:
+1. Read the plugin source file from ~/.config/lain/plugins/
+2. Identify the issue
+3. Edit the file to fix it
+4. The plugin will auto-reload after you save — you will be notified of the result
+
+If you receive multiple errors, fix them one at a time.
+
+Available tools: run_command (use to cat, sed, or rewrite files).
+Plugin directory: ~/.config/lain/plugins/
+Plugin extension: .lua
+Available Lua libraries: string, table, math, coroutine (no os, io, debug, package)
+Plugin API: lain.window, lain.chat, lain.session, lain.state, lain.log, lain.command, lain.keybind`
 }
 
 type blankWindow struct {

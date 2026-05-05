@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	lua "github.com/yuin/gopher-lua"
 	tea "github.com/charmbracelet/bubbletea"
@@ -25,6 +26,8 @@ type PluginAPI struct {
 	commandCallbacks map[string]func(string)
 	keybindCallbacks map[string]func()
 	pluginWindows    map[string]*pluginWindow
+	errCh            chan PluginError
+	pluginKeybinds   map[string]string
 	onWindowChange   func()
 }
 
@@ -38,9 +41,10 @@ type pluginWindow struct {
 	width      int
 	height     int
 	state      map[string]any
+	api        *PluginAPI
 }
 
-func newPluginWindow(id, title, pluginName string, L *lua.LState, renderFn, updateFn *lua.LFunction) *pluginWindow {
+func newPluginWindow(id, title, pluginName string, L *lua.LState, renderFn, updateFn *lua.LFunction, api *PluginAPI) *pluginWindow {
 	return &pluginWindow{
 		id:         id,
 		title:      title,
@@ -49,6 +53,7 @@ func newPluginWindow(id, title, pluginName string, L *lua.LState, renderFn, upda
 		renderFn:   renderFn,
 		updateFn:   updateFn,
 		state:      make(map[string]any),
+		api:        api,
 	}
 }
 
@@ -84,6 +89,7 @@ func (w *pluginWindow) View(width, height int, focused bool) string {
 
 	if err != nil {
 		slog.Error("plugin render error", "plugin", w.pluginName, "window", w.id, "error", err)
+		w.api.sendPluginError(w.pluginName, err.Error(), "render")
 		return fmt.Sprintf("[render error: %s]", err.Error())
 	}
 
@@ -104,6 +110,7 @@ func NewPluginAPI() *PluginAPI {
 		commandCallbacks: make(map[string]func(string)),
 		keybindCallbacks: make(map[string]func()),
 		pluginWindows:    make(map[string]*pluginWindow),
+		pluginKeybinds:   make(map[string]string),
 	}
 }
 
@@ -129,6 +136,25 @@ func (api *PluginAPI) SetLLMClientGetter(fn func() *LLMClient) {
 
 func (api *PluginAPI) SetWindowChangeCallback(fn func()) {
 	api.onWindowChange = fn
+}
+
+func (api *PluginAPI) SetErrorChannel(ch chan PluginError) {
+	api.errCh = ch
+}
+
+func (api *PluginAPI) sendPluginError(pluginName, errMsg, source string) {
+	if api.errCh == nil {
+		return
+	}
+	select {
+	case api.errCh <- PluginError{
+		PluginName: pluginName,
+		Error:      errMsg,
+		Source:     source,
+		Timestamp:  time.Now(),
+	}:
+	default:
+	}
 }
 
 func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
@@ -167,6 +193,41 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		}
 		L.Push(t)
 		return 1
+	}))
+	L.SetField(windowTable, "move", L.NewFunction(func(L *lua.LState) int {
+		dirInt := int(L.CheckNumber(1))
+		if api.wm != nil {
+			api.wm.MoveFocused(FocusDir(dirInt))
+			api.wm.SetSize(api.wm.width, api.wm.height)
+		}
+		return 0
+	}))
+	L.SetField(windowTable, "zoom", L.NewFunction(func(L *lua.LState) int {
+		if api.wm != nil {
+			api.wm.ToggleZoom()
+		}
+		return 0
+	}))
+	L.SetField(windowTable, "equalize", L.NewFunction(func(L *lua.LState) int {
+		if api.wm != nil {
+			api.wm.Equalize()
+		}
+		return 0
+	}))
+	L.SetField(windowTable, "borders", L.NewFunction(func(L *lua.LState) int {
+		if L.GetTop() >= 1 {
+			enabled := L.CheckBool(1)
+			if api.wm != nil {
+				if api.wm.bordersEnabled != enabled {
+					api.wm.ToggleBorders()
+				}
+			}
+		} else {
+			if api.wm != nil {
+				api.wm.ToggleBorders()
+			}
+		}
+		return 0
 	}))
 	L.SetField(lainTable, "window", windowTable)
 
@@ -270,6 +331,7 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 			defer L.SetTop(top)
 			if err := L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}, lua.LString(arg)); err != nil {
 				slog.Error("plugin command error", "command", name, "error", err)
+				api.sendPluginError(pluginName, fmt.Sprintf("command %q: %s", name, err.Error()), "command")
 			}
 		}
 		return 0
@@ -285,8 +347,10 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 			defer L.SetTop(top)
 			if err := L.CallByParam(lua.P{Fn: fn, NRet: 0, Protect: true}); err != nil {
 				slog.Error("plugin keybind error", "key", key, "error", err)
+				api.sendPluginError(pluginName, fmt.Sprintf("keybind %q: %s", key, err.Error()), "keybind")
 			}
 		}
+		api.pluginKeybinds[key] = pluginName
 		return 0
 	}))
 	L.SetField(lainTable, "keybind", keybindTable)
@@ -299,6 +363,7 @@ func (api *PluginAPI) luaWindowRegister(L *lua.LState, pluginName string, opts *
 	title := getStringField(L, opts, "title")
 	if id == "" {
 		slog.Error("plugin window register: missing id", "plugin", pluginName)
+		api.sendPluginError(pluginName, "window register: missing id", "register")
 		return
 	}
 	if title == "" {
@@ -309,7 +374,7 @@ func (api *PluginAPI) luaWindowRegister(L *lua.LState, pluginName string, opts *
 	updateFn := getFunctionField(L, opts, "update")
 	isFloat := getBoolField(L, opts, "float")
 
-	pw := newPluginWindow(id, title, pluginName, L, renderFn, updateFn)
+	pw := newPluginWindow(id, title, pluginName, L, renderFn, updateFn, api)
 	api.pluginWindows[id] = pw
 
 	if api.wm != nil {
@@ -367,6 +432,7 @@ func (api *PluginAPI) FireMessageCallbacks(role, text string) {
 			L.SetTop(top)
 			if err != nil {
 				slog.Error("plugin message callback error", "plugin", plugin, "error", err)
+				api.sendPluginError(plugin, err.Error(), "callback")
 			}
 		}
 	}
@@ -385,8 +451,11 @@ func (api *PluginAPI) ClearPlugin(pluginName string) {
 			delete(api.commandCallbacks, name)
 		}
 	}
-	for key := range api.keybindCallbacks {
-		delete(api.keybindCallbacks, key)
+	for key, plugin := range api.pluginKeybinds {
+		if plugin == pluginName {
+			delete(api.keybindCallbacks, key)
+			delete(api.pluginKeybinds, key)
+		}
 	}
 }
 

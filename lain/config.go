@@ -8,6 +8,11 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type SubAgentConfig struct {
+	Profile string `yaml:"profile"`
+	AutoFix bool   `yaml:"auto_fix"`
+}
+
 type LainConfig struct {
 	APIURL              string        `yaml:"api_url"`
 	APIKey              string        `yaml:"api_key"`
@@ -21,6 +26,7 @@ type LainConfig struct {
 	MaxNudges           int           `yaml:"max_nudges"`
 	NudgeMessage        string        `yaml:"nudge_message"`
 	NoStream            bool          `yaml:"no_stream"`
+	SubAgent            SubAgentConfig `yaml:"sub_agent"`
 }
 
 type ServersConfig struct {

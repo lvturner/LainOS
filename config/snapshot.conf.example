@@ -1,0 +1,5 @@
+SNAPSHOT_INTERVAL=3600
+SNAPSHOT_SOURCE="/home/lainos"
+SNAPSHOT_DIR="/snapshots"
+SNAPSHOT_RETENTION_DAYS=30
+SNAPSHOT_EXCLUDE="\.cache|\.camofox|\.camoufox|\.npm|\.local|\.fontconfig|/tmp"

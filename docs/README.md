@@ -9,6 +9,7 @@ Documentation for the lainos webhook gateway platform. These docs are available 
 - **[camofox.md](camofox.md)** — Anti-detection headless browser server: API reference, session persistence, search macros, service management
 - **[cloudflare-tunnel.md](cloudflare-tunnel.md)** — Setting up Cloudflare tunnels: creating new tunnels, using existing ones, DNS routing, and ingress configuration
 - **[container-management.md](container-management.md)** — Container lifecycle: build, start, stop, SSH access, systemd services, and volume mounts
+- **[snapshots.md](snapshots.md)** — Home directory snapshots: setup, configuration, restore, retention policy, and troubleshooting
 - **[examples.md](examples.md)** — Webhook handler examples: GitHub signature verification, push/deploy/issue/PR/release handlers, and the async handler pattern
 
 ## Quick Start

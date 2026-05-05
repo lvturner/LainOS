@@ -1,5 +1,7 @@
 package main
 
+import "math"
+
 type SplitDirection int
 
 const (
@@ -13,10 +15,10 @@ type LayoutNode struct {
 }
 
 type SplitNode struct {
-	Direction SplitDirection
-	Ratio     float64
-	Left      *LayoutNode
-	Right     *LayoutNode
+	Direction  SplitDirection
+	Ratio      float64
+	Left       *LayoutNode
+	Right      *LayoutNode
 	FixedRight int
 }
 
@@ -131,14 +133,100 @@ func (n *LayoutNode) leaves() []string {
 	return result
 }
 
-func (n *LayoutNode) leafIndex(windowID string) int {
-	leaves := n.leaves()
-	for i, id := range leaves {
-		if id == windowID {
-			return i
+func (n *LayoutNode) swapLeaves(id1, id2 string) bool {
+	leaf1 := n.find(id1)
+	leaf2 := n.find(id2)
+	if leaf1 == nil || leaf2 == nil {
+		return false
+	}
+	leaf1.Leaf.WindowID, leaf2.Leaf.WindowID = leaf2.Leaf.WindowID, leaf1.Leaf.WindowID
+	return true
+}
+
+func (n *LayoutNode) equalize() {
+	if n.Split == nil {
+		return
+	}
+	if n.Split.FixedRight == 0 {
+		n.Split.Ratio = 0.5
+	}
+	n.Split.Left.equalize()
+	n.Split.Right.equalize()
+}
+
+func (n *LayoutNode) findAdjacentLeaf(fromID string, dir FocusDir, totalW, totalH int) *LayoutNode {
+	rects := n.layout(totalW, totalH)
+	fromRect, ok := rects[fromID]
+	if !ok {
+		return nil
+	}
+
+	fromCX := float64(fromRect.X) + float64(fromRect.W)/2
+	fromCY := float64(fromRect.Y) + float64(fromRect.H)/2
+
+	var best *LayoutNode
+	bestDist := math.MaxFloat64
+
+	for id, rect := range rects {
+		if id == fromID {
+			continue
+		}
+		cx := float64(rect.X) + float64(rect.W)/2
+		cy := float64(rect.Y) + float64(rect.H)/2
+
+		switch dir {
+		case FocusLeft:
+			if cx >= fromCX {
+				continue
+			}
+			overlapY := overlap(fromRect.Y, fromRect.Y+fromRect.H, rect.Y, rect.Y+rect.H)
+			if overlapY <= 0 {
+				continue
+			}
+		case FocusRight:
+			if cx <= fromCX {
+				continue
+			}
+			overlapY := overlap(fromRect.Y, fromRect.Y+fromRect.H, rect.Y, rect.Y+rect.H)
+			if overlapY <= 0 {
+				continue
+			}
+		case FocusUp:
+			if cy >= fromCY {
+				continue
+			}
+			overlapX := overlap(fromRect.X, fromRect.X+fromRect.W, rect.X, rect.X+rect.W)
+			if overlapX <= 0 {
+				continue
+			}
+		case FocusDown:
+			if cy <= fromCY {
+				continue
+			}
+			overlapX := overlap(fromRect.X, fromRect.X+fromRect.W, rect.X, rect.X+rect.W)
+			if overlapX <= 0 {
+				continue
+			}
+		}
+
+		dist := math.Hypot(cx-fromCX, cy-fromCY)
+		if dist < bestDist {
+			bestDist = dist
+			node := n.find(id)
+			best = node
 		}
 	}
-	return -1
+
+	return best
+}
+
+func overlap(a1, a2, b1, b2 int) float64 {
+	left := max(a1, b1)
+	right := min(a2, b2)
+	if right <= left {
+		return 0
+	}
+	return float64(right - left)
 }
 
 type LayoutRect struct {

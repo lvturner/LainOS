@@ -1,0 +1,6 @@
+[Unit]
+Description=Prune old home directory snapshots
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/home-snapshot-cleanup.sh

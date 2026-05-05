@@ -212,6 +212,44 @@ lain uses an MDI (Multiple Document Interface) with a tiling window manager. Pre
 
 The chat window is always present and cannot be closed. The todo sidebar is always shown on the right.
 
+## Sub-Agent System
+
+lain can spawn independent sub-agents that run in their own tiled windows alongside the main chat.
+Each sub-agent has its own LLM client, conversation history, tools, and system prompt.
+
+### Plugin Error Recovery
+
+When a Lua plugin encounters an error (load failure, syntax error, runtime error), lain captures it
+and offers to spawn a fix agent:
+
+1. The error appears in the status bar: `⚠ plugin "name": error text — F:fix  Esc:dismiss`
+2. lain switches to normal mode so you can respond without interrupting the main agent
+3. Press **F** to spawn a fix agent, or **Esc**/**i** to dismiss
+4. The fix agent opens in a new tiled window, reads the plugin source, and edits the file
+5. Plugin auto-reloads on save — agent is notified of success or further errors
+6. Multiple errors queue into a single fix agent window
+7. The fix agent window stays open after completion for review
+
+### Sub-Agent Configuration
+
+Add to your profile's `config.yaml`:
+
+```yaml
+sub_agent:
+  profile: "default"  # profile to use for sub-agents (default: current profile)
+  auto_fix: false     # skip confirmation prompt, auto-spawn fix agent on errors
+```
+
+If `auto_fix: true`, plugin errors immediately spawn a fix agent without prompting.
+Use with caution — each fix agent makes LLM API calls.
+
+The `profile` field lets you use a cheaper/faster model for sub-agents. For example:
+
+```yaml
+sub_agent:
+  profile: "fast"  # uses the "fast" profile for sub-agents
+```
+
 ## Plugin System
 
 Plugins are Lua scripts that extend lain's UI at runtime. They live at `~/.config/lain/plugins/*.lua` and are **hot-reloaded** on file change — no restart needed.

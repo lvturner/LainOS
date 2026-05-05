@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Camofox provides an anti-detection headless browser server for AI agents. Config is YAML with hot-reload. Full plan lives in `PLAN.md`.
+Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Camofox provides an anti-detection headless browser server for AI agents. Automatic btrfs snapshots of the home directory. Config is YAML with hot-reload. Full plan lives in `PLAN.md`.
 
 ## Tech Stack
 
@@ -16,6 +16,7 @@ Webhook HTTP gateway written in Go, running as a single privileged systemd conta
 - **Config hot-reload**: fsnotify (`github.com/fsnotify/fsnotify`)
 - **Container orchestration**: podman-compose via `compose.yaml`
 - **Browser automation**: Camofox (Camoufox-based anti-detection browser, REST API on port 9377)
+- **Snapshot tooling**: inotify-tools, btrfs-progs
 - **TUI framework**: Bubble Tea + lipgloss (lain)
 
 ## Build & Run Commands
@@ -106,6 +107,9 @@ The lain interactive LLM CLI lives in `lain/`. All `.go` files are in a single p
 | `markdown.go` | Markdown rendering via glamour |
 | `banner.go` | ASCII banner |
 | `oneshot.go` | Non-interactive mode |
+| `sub_agent.go` | Sub-agent spawner: manages independent LLMClient + ToolRegistry + context lifecycle |
+| `agent_window.go` | `agentWindow` type: mini-chat Window implementation for sub-agents |
+| `notification.go` | Floating notification overlay: auto-dismissing, non-modal |
 
 ### Window interface
 
@@ -131,10 +135,36 @@ type Window interface {
 ### Plugin system
 
 - Plugins are `.lua` files in `~/.config/lain/plugins/`
-- Each plugin runs in an isolated Lua 5.1 sandbox (`os`, `io`, `debug`, `package` removed)
+- Each plugin runs in a Lua 5.1 state with full standard libraries (`base`, `string`, `table`, `math`, `coroutine`, `io`, `os`, `package`); only `debug` is omitted
 - fsnotify watches for changes — plugins hot-reload without restart
 - Plugins register windows, callbacks, slash commands, and keybindings via the `lain.*` API
 - All Lua execution happens on the Bubble Tea update goroutine (thread-safe)
+
+### Sub-Agent System
+
+Sub-agents are independent LLM clients running in their own tiled windows. They share the same
+WindowManager but have isolated conversation history, tools, and cancellation.
+
+- Spawned via `SubAgentManager.Spawn()` with configurable profile and system prompt
+- Each gets its own `LLMClient`, `ToolRegistry`, and `MCPManager`
+- Events routed via `subAgentEventMsg` to the correct `agentWindow`
+- Window stays open after completion for user review
+
+### Plugin Error Recovery
+
+When a plugin fails to load or execute:
+1. Error is captured via `PluginLoader.errCh` (not just logged)
+2. User is prompted (normal mode: F to fix, Esc to dismiss) unless `auto_fix` is enabled
+3. Fix agent spawned in a tiled window with the error context and plugin source
+4. Agent reads/edits the Lua file, hot-reload picks up changes
+5. On successful reload, agent is notified and a success notification is shown
+
+Configuration in profile's `config.yaml`:
+```yaml
+sub_agent:
+  profile: "default"  # profile for sub-agents, empty = current profile
+  auto_fix: false     # if true, skip user confirmation before spawning fix agent
+```
 
 ## Container Architecture
 
@@ -155,6 +185,7 @@ type Window interface {
 | Host mount | Container path | Purpose |
 |---|---|---|
 | `./.data/home/` | `/home/lainos/` | Entire home directory (config, workspace, dotfiles) |
+| `./.data/snapshots/` | `/snapshots` | Btrfs snapshot storage |
 | *(named volume)* | `/nix` | Nix store — persists across container rebuilds |
 
 - Config changes to `gateway.yaml` are hot-reloaded (no restart needed)
@@ -194,6 +225,28 @@ Camofox is installed at `/home/lainos/camofox-browser/` (cloned from `jo-inc/cam
 
 Key environment variables can be overridden via `systemctl --user edit camofox`. See `docs/camofox.md` for full API reference.
 
+## Snapshot System
+
+The home directory (`/home/lainos`) is a btrfs subvolume, automatically snapshotted when files change. Snapshots are read-only btrfs COW snapshots stored in `/snapshots/`.
+
+- **Config**: `/home/lainos/config/snapshot.conf` (sourced shell vars, reconfigurable at runtime)
+- **Watcher**: `home-snapshot.service` runs `home-snapshot-watch.sh` (inotifywait + debounce)
+- **Cleanup**: `home-snapshot-cleanup.timer` runs hourly, applies tiered retention (30 days)
+- **Snapshot scripts**: `scripts/home-snapshot.sh`, `scripts/home-snapshot-watch.sh`, `scripts/home-snapshot-cleanup.sh`
+- **One-time migration**: `scripts/migrate-to-subvolume.sh` (run on host before first use)
+
+### Key config variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `SNAPSHOT_INTERVAL` | `3600` | Min seconds between snapshots |
+| `SNAPSHOT_SOURCE` | `/home/lainos` | Directory to snapshot |
+| `SNAPSHOT_DIR` | `/snapshots` | Snapshot storage location |
+| `SNAPSHOT_RETENTION_DAYS` | `30` | Max snapshot age in days |
+| `SNAPSHOT_EXCLUDE` | (regex) | inotifywait exclude patterns |
+
+Changes require `systemctl --user restart home-snapshot`.
+
 ## Code Style
 
 - No comments unless explicitly asked
@@ -202,7 +255,7 @@ Key environment variables can be overridden via `systemctl --user edit camofox`.
 - Keep all lain source in `lain/` as a flat `main` package
 - Use `log/slog` for structured logging
 - Use standard library HTTP types (`net/http`)
-- Lua plugins: use `lain.*` API only (no `os`/`io` access), keep render functions fast (called every frame)
+- Lua plugins: use `lain.*` API for TUI integration; `io`/`os` libraries are available for filesystem and system access; keep render functions fast (called every frame)
 
 ## Testing
 
@@ -227,6 +280,7 @@ User-facing documentation lives in `docs/` and is available inside the container
 - Build file is `Containerfile` (not `Dockerfile`) — podman naming
 - Compose file is `compose.yaml` (not `docker-compose.yml`)
 - Example configs use `.example.yaml` / `.example.md` suffix in `config/`
+- Snapshot config uses `.conf` suffix in `config/` (sourced as shell variables)
 - Systemd unit files go in `systemd/`
 - Shell scripts go in `scripts/`
 - Systemd presets go in `systemd/` as `98-lainos.preset` (must sort before `99-default-disable.preset`)

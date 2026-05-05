@@ -8,6 +8,7 @@ services:
     stop_signal: SIGRTMIN+3
     volumes:
       - ./.data/home:/home/lainos:Z
+      - ./.data/snapshots:/snapshots:Z
       - nix:/nix
     restart: unless-stopped
 

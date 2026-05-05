@@ -1,0 +1,13 @@
+[Unit]
+Description=Home directory btrfs snapshot watcher
+After=home-mount.service fix-home-permissions.service
+Wants=home-snapshot-cleanup.timer
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/home-snapshot-watch.sh
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

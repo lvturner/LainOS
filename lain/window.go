@@ -178,10 +178,5 @@ func (w *todoWindow) View(width, height int, focused bool) string {
 		b.WriteString(strings.Repeat(" ", width) + "\n")
 	}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.Border{Left: "│"}, false, false, false, true).
-		BorderForeground(lipgloss.Color("243")).
-		Width(width).
-		Height(height).
-		Render(strings.TrimSuffix(b.String(), "\n"))
+	return strings.TrimSuffix(b.String(), "\n")
 }

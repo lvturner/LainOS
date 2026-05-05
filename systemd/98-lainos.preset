@@ -1,1 +1,3 @@
 enable first-boot-setup.service
+enable home-snapshot.service
+enable home-snapshot-cleanup.timer

@@ -182,7 +182,6 @@ outer:
 
 		var content strings.Builder
 		toolCalls := make(map[int]*openai.ToolCall)
-		var finishReason openai.FinishReason
 
 		if c.noStream {
 			type nonStreamResult struct {
@@ -209,7 +208,6 @@ outer:
 						content.WriteString(choice.Message.Content)
 						ch <- StreamEvent{Type: "token", Content: content.String()}
 					}
-					finishReason = choice.FinishReason
 					for i, tc := range choice.Message.ToolCalls {
 						tcCopy := tc
 						toolCalls[i] = &tcCopy
@@ -332,7 +330,6 @@ outer:
 						gotContent = true
 					}
 					if choice.FinishReason != "" {
-						finishReason = choice.FinishReason
 						gotContent = true
 					}
 					if gotContent {
@@ -382,7 +379,7 @@ outer:
 			assistantMsg.ToolCalls = tcList
 		}
 		c.history = append(c.history, assistantMsg)
-		if finishReason == openai.FinishReasonToolCalls && len(toolCalls) > 0 {
+		if len(toolCalls) > 0 {
 			for _, idx := range indices {
 				select {
 				case <-ctx.Done():
@@ -419,11 +416,12 @@ outer:
 				} else {
 					type toolExecResult struct {
 						output string
+						err    error
 					}
 					toolCh := make(chan toolExecResult, 1)
 					go func() {
-						out, _ := c.registry.ExecuteTool(tc.Function.Name, args)
-						toolCh <- toolExecResult{out}
+						out, err := c.registry.ExecuteTool(tc.Function.Name, args)
+						toolCh <- toolExecResult{out, err}
 					}()
 
 					toolTimer := time.NewTimer(effectiveTimeout)
@@ -431,6 +429,9 @@ outer:
 					case r := <-toolCh:
 						toolTimer.Stop()
 						output = r.output
+						if r.err != nil {
+							output = fmt.Sprintf("Error: %s", r.err.Error())
+						}
 					case <-toolTimer.C:
 						timedOut = true
 					case <-ctx.Done():
@@ -469,7 +470,7 @@ outer:
 					continue outer
 				}
 
-				if output == "" {
+				if output == "" && !timedOut {
 					output = "Tool completed successfully."
 				}
 				ch <- StreamEvent{
@@ -536,6 +537,7 @@ outer:
 }
 
 func (c *LLMClient) buildMessages() []openai.ChatCompletionMessage {
+	c.validateAndRepairHistory()
 	msgs := make([]openai.ChatCompletionMessage, 0, len(c.history)+1)
 	if c.systemMsg != "" {
 		msgs = append(msgs, openai.ChatCompletionMessage{
@@ -545,6 +547,39 @@ func (c *LLMClient) buildMessages() []openai.ChatCompletionMessage {
 	}
 	msgs = append(msgs, c.history...)
 	return msgs
+}
+
+func (c *LLMClient) validateAndRepairHistory() {
+	var repaired []openai.ChatCompletionMessage
+	for i := 0; i < len(c.history); i++ {
+		msg := c.history[i]
+		repaired = append(repaired, msg)
+		if len(msg.ToolCalls) == 0 {
+			continue
+		}
+		responded := make(map[string]bool)
+		for j := i + 1; j < len(c.history); j++ {
+			if c.history[j].Role == openai.ChatMessageRoleTool {
+				responded[c.history[j].ToolCallID] = true
+			} else {
+				break
+			}
+		}
+		for _, tc := range msg.ToolCalls {
+			if !responded[tc.ID] {
+				slog.Warn("repairing orphaned tool_call", "tool", tc.Function.Name, "id", tc.ID)
+				repaired = append(repaired, openai.ChatCompletionMessage{
+					Role:       openai.ChatMessageRoleTool,
+					Content:    fmt.Sprintf("Error: tool '%s' was not executed (history repair).", tc.Function.Name),
+					ToolCallID: tc.ID,
+				})
+			}
+		}
+	}
+	if len(repaired) != len(c.history) {
+		slog.Warn("history repaired", "original", len(c.history), "repaired", len(repaired))
+		c.history = repaired
+	}
 }
 
 func sortedIntKeys(m map[int]*openai.ToolCall) []int {

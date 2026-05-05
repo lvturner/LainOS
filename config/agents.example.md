@@ -77,6 +77,68 @@ systemctl restart wh-gateway
 
 This is rarely needed since config changes are hot-reloaded, but useful if the service crashes or you need to debug.
 
+## Home Directory Snapshots
+
+The home directory is automatically snapshotted using btrfs copy-on-write snapshots. Snapshots are stored in `/snapshots/` and named by timestamp (e.g., `home-2026-05-05T08-00-00`).
+
+### Configuration
+
+Edit `/home/lainos/config/snapshot.conf` and restart the watcher:
+
+```bash
+vim ~/config/snapshot.conf
+systemctl --user restart home-snapshot
+```
+
+Key settings:
+- `SNAPSHOT_INTERVAL` — min seconds between snapshots (default: 3600 / hourly)
+- `SNAPSHOT_RETENTION_DAYS` — how long to keep snapshots (default: 30 days)
+- `SNAPSHOT_EXCLUDE` — regex of paths to exclude from triggering snapshots
+
+### Restoring files
+
+Snapshots are read-only directory trees. Copy files out using `--reflink=auto` (zero-cost on btrfs):
+
+```bash
+# List available snapshots
+ls /snapshots/
+
+# Restore a single file
+cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/path/to/file ~/path/to/file
+
+# Restore a directory
+cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/.config ~/.config
+
+# Compare current vs snapshot
+diff -r /snapshots/home-2026-05-05T08-00-00/workspace ~/workspace
+```
+
+### Manual operations
+
+```bash
+# Create a snapshot now
+/usr/local/bin/home-snapshot.sh
+
+# Trigger cleanup immediately
+systemctl --user start home-snapshot-cleanup
+
+# View snapshot service logs
+journalctl --user -u home-snapshot -f
+```
+
+### Retention policy
+
+- All snapshots kept for 1 hour
+- 1 per hour for 24 hours
+- 1 per day for 7 days
+- 1 per week for 30 days
+- Older than 30 days: deleted
+
+### Excluded directories
+
+These directories do not trigger snapshots (high churn, regenerable):
+`.cache`, `.camofox`, `.camoufox`, `.npm`, `.local`, `.fontconfig`, `tmp`
+
 ## No `sudo`
 
 The `lainos` user is unprivileged. **Never use `sudo`.** It is not available and will fail.

@@ -56,6 +56,7 @@ RUN mkdir -p /var/usrlocal/bin && \
     nodejs \
     curl \
     git unzip python3 \
+    inotify-tools \
     gtk3 dbus-glib libXt alsa-lib libXcomposite libXcursor libXdamage libXfixes \
     libXi libXrandr libXrender libXScrnSaver libXtst \
     mesa-libEGL mesa-dri-drivers libgbm \
@@ -107,13 +108,20 @@ COPY docs/ /usr/share/doc/lainos/
 
 COPY systemd/fix-home-permissions.service /usr/lib/systemd/system/
 COPY systemd/first-boot-setup.service /usr/lib/systemd/system/
+COPY systemd/home-snapshot.service /usr/lib/systemd/system/
+COPY systemd/home-snapshot-cleanup.service /usr/lib/systemd/system/
+COPY systemd/home-snapshot-cleanup.timer /usr/lib/systemd/system/
 COPY systemd/98-lainos.preset /usr/lib/systemd/system-preset/
 COPY systemd/cloudflared.service /etc/systemd/user/
 
 COPY scripts/fix-home-permissions.sh /usr/local/bin/fix-home-permissions.sh
 COPY scripts/first-boot-setup.sh /usr/local/bin/first-boot-setup.sh
 COPY scripts/init-wrapper.sh /usr/local/bin/init-wrapper.sh
-RUN chmod +x /usr/local/bin/fix-home-permissions.sh /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh
+COPY scripts/home-snapshot.sh /usr/local/bin/home-snapshot.sh
+COPY scripts/home-snapshot-watch.sh /usr/local/bin/home-snapshot-watch.sh
+COPY scripts/home-snapshot-cleanup.sh /usr/local/bin/home-snapshot-cleanup.sh
+RUN chmod +x /usr/local/bin/fix-home-permissions.sh /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh \
+    /usr/local/bin/home-snapshot.sh /usr/local/bin/home-snapshot-watch.sh /usr/local/bin/home-snapshot-cleanup.sh
 
 RUN cp -a /home/lainos /etc/skel-lainos
 
