@@ -1,0 +1,16 @@
+api_url: "https://api.deepseek.com/v1"
+api_key: "sk-..."
+model: "deepseek-chat"
+temperature: 0.7
+max_tokens: 4096
+context_length: 128000
+compaction_threshold: 60
+compaction_strategy: "keep_last"
+idle_timeout: 120s
+max_nudges: 3
+nudge_message: "You haven't produced output in a while. If you're about to run something slow, use extend_timeout. Otherwise, continue your task."
+no_stream: false
+
+sub_agent:
+  profile: "default"
+  auto_fix: false

@@ -990,8 +990,8 @@ func (m model) View() string {
 		statusBar = statusStyle.Render("  " + m.spinner.View() + " thinking...")
 	} else {
 		pct := m.llmClient.ContextPercent()
-		ctxWin := m.llmClient.ContextWindow()
-		ctxLabel := fmt.Sprintf("ctx: %d%% (%dk/%dk)", pct, pct*ctxWin/100/1000, ctxWin/1000)
+		ctxLen := m.llmClient.ContextLength()
+		ctxLabel := fmt.Sprintf("ctx: %d%% (%dk/%dk)", pct, pct*ctxLen/100/1000, ctxLen/1000)
 		statusBar = ctxStyle.Render("  " + ctxLabel)
 	}
 

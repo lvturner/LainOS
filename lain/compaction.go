@@ -60,7 +60,7 @@ func (c *LLMClient) needsCompaction() bool {
 	if effectiveThreshold > 90 {
 		effectiveThreshold = 90
 	}
-	threshold := int(float64(c.contextWindow) * float64(effectiveThreshold) / 100.0)
+	threshold := int(float64(c.contextLength) * float64(effectiveThreshold) / 100.0)
 	return estimated >= threshold
 }
 

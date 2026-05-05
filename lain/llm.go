@@ -31,7 +31,7 @@ type LLMClient struct {
 	history             []openai.ChatCompletionMessage
 	tools               []openai.Tool
 	registry            *ToolRegistry
-	contextWindow       int
+	contextLength       int
 	compactionThreshold int
 	compactionStrategy  string
 	idleTimeout         time.Duration
@@ -56,7 +56,7 @@ func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools
 		maxTokens:           cfg.MaxTokens,
 		tools:               tools,
 		registry:            registry,
-		contextWindow:       cfg.ContextWindow,
+		contextLength:       cfg.ContextLength,
 		compactionThreshold: cfg.CompactionThreshold,
 		compactionStrategy:  cfg.CompactionStrategy,
 		idleTimeout:         cfg.IdleTimeout,
@@ -88,7 +88,7 @@ func (c *LLMClient) CompactionInfo() (estimated, threshold int) {
 	if effectiveThreshold > 90 {
 		effectiveThreshold = 90
 	}
-	threshold = int(float64(c.contextWindow) * float64(effectiveThreshold) / 100.0)
+	threshold = int(float64(c.contextLength) * float64(effectiveThreshold) / 100.0)
 	return
 }
 
@@ -99,18 +99,18 @@ func (c *LLMClient) ContextPercent() int {
 	} else {
 		used = estimateTokens(c.history)
 	}
-	if c.contextWindow <= 0 {
+	if c.contextLength <= 0 {
 		return 0
 	}
-	pct := used * 100 / c.contextWindow
+	pct := used * 100 / c.contextLength
 	if pct > 100 {
 		pct = 100
 	}
 	return pct
 }
 
-func (c *LLMClient) ContextWindow() int {
-	return c.contextWindow
+func (c *LLMClient) ContextLength() int {
+	return c.contextLength
 }
 
 func (c *LLMClient) InjectMessage(msg string) {

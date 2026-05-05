@@ -147,6 +147,7 @@ api_key: "${api_key}"
 model: "${model}"
 temperature: ${temperature}
 max_tokens: 4096
+context_length: 128000
 YAML
         echo -e "  ${GREEN}created${RESET} lain default profile config"
     fi

@@ -19,7 +19,7 @@ type LainConfig struct {
 	Model               string        `yaml:"model"`
 	Temperature         float64       `yaml:"temperature"`
 	MaxTokens           int           `yaml:"max_tokens"`
-	ContextWindow       int           `yaml:"context_window"`
+	ContextLength       int           `yaml:"context_length"`
 	CompactionThreshold int           `yaml:"compaction_threshold"`
 	CompactionStrategy  string        `yaml:"compaction_strategy"`
 	IdleTimeout         time.Duration `yaml:"idle_timeout"`
@@ -48,8 +48,8 @@ func LoadConfig(path string) (*LainConfig, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, err
 	}
-	if cfg.ContextWindow == 0 {
-		cfg.ContextWindow = 128000
+	if cfg.ContextLength == 0 {
+		cfg.ContextLength = 128000
 	}
 	if cfg.CompactionThreshold == 0 {
 		cfg.CompactionThreshold = 60

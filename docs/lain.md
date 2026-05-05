@@ -59,7 +59,7 @@ api_key: "sk-..."
 model: "deepseek-chat"
 temperature: 0.7
 max_tokens: 4096
-context_window: 128000
+context_length: 128000
 compaction_threshold: 60
 compaction_strategy: "keep_last"
 idle_timeout: 120s
@@ -74,7 +74,7 @@ nudge_message: "You haven't produced output in a while. If you're about to run s
 | `model` | Model identifier | required |
 | `temperature` | Sampling temperature (0.0–2.0) | `0.7` |
 | `max_tokens` | Maximum tokens per response | `4096` |
-| `context_window` | Estimated context window in tokens | `128000` |
+| `context_length` | Estimated context length in tokens | `128000` |
 | `compaction_threshold` | Percentage of context window before compaction triggers | `60` |
 | `compaction_strategy` | Compaction strategy: `keep_last` keeps the last user message | `keep_last` |
 | `idle_timeout` | Seconds before nudging a stalled agent | `120s` |
@@ -181,7 +181,7 @@ The `extend_timeout` tool lets the agent proactively request more time before lo
 When the conversation history approaches the context window limit, lain automatically compacts it:
 
 1. Estimates current token usage from message history
-2. When usage reaches the configured `compaction_threshold` percentage of `context_window`, triggers compaction
+2. When usage reaches the configured `compaction_threshold` percentage of `context_length`, triggers compaction
 3. Sends the conversation to the LLM with a summarization prompt
 4. Replaces old history with the summary, keeping the last user message (if `compaction_strategy` is `keep_last`)
 5. Compaction events are shown in the TUI and in stderr for one-shot mode
