@@ -281,12 +281,12 @@ Save the file and the window appears immediately in the tiled layout.
 
 | Function | Description |
 |---|---|
-| `register(opts)` | Register a window. `opts`: `{ id, title, float, render=fn, update=fn }` |
+| `register(opts)` | Register a window. `opts`: `{ id, title, float, render=fn, update=fn, interval=ms, tick=fn }` |
 | `close(id)` | Close and unregister a window |
 | `focus(id)` | Focus a window by ID |
 | `list()` | List all open window IDs |
 
-The `render` function receives `(width, height)` and must return a string. The `update` function receives an event table.
+The `render` function receives `(width, height)` and must return a string. The `update` function receives an event table. The `interval` option (number, milliseconds) triggers a re-render every N milliseconds. The `tick` option (function) is an optional callback called on the executor goroutine before each interval re-render — use it for async data fetching.
 
 #### lain.chat
 
@@ -337,7 +337,7 @@ The `render` function receives `(width, height)` and must return a string. The `
 | `exec(cmd, opts?)` | Run command synchronously. Returns `{ stdout, stderr, exit_code, success }`. Options: `{ timeout=30, cwd="", env={} }` |
 | `exec_async(cmd, opts, callback)` | Run command asynchronously. `callback(result)` called on completion. |
 
-Render functions have a 50ms timeout — use `exec_async` for commands in render. Callbacks have a 5s timeout — `exec` is fine for fast commands.
+Render functions have a 50ms timeout — use `exec_async` for commands in render. Callbacks and tick functions have a 5s timeout — `exec` is fine for fast commands.
 
 ### Available Lua libraries
 
@@ -381,6 +381,38 @@ lain.chat.on_message(function(role, text)
     lain.state.set("lines", lines)
   end
 end)
+```
+
+### Clock example (interval timer)
+
+```lua
+lain.window.register({
+  id = "clock",
+  title = "Clock",
+  interval = 1000,
+  render = function(w, h)
+    return os.date("%H:%M:%S")
+  end,
+})
+```
+
+### Weather example (interval + tick)
+
+```lua
+lain.window.register({
+  id = "weather",
+  title = "Weather",
+  interval = 30000,
+  tick = function()
+    local result = lain.exec.exec("curl -s wttr.in?format=3", { timeout = 10 })
+    if result.success then
+      lain.state.set("weather", result.stdout)
+    end
+  end,
+  render = function(w, h)
+    return lain.state.get("weather") or "loading..."
+  end,
+})
 ```
 
 ## Slash Commands

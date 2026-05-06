@@ -93,7 +93,7 @@ The lain interactive LLM CLI lives in `lain/`. All `.go` files are in a single p
 | `tile.go` | Binary layout tree: `SplitNode`/`LeafNode`, split/unsplit/resize, fixed-size splits |
 | `float.go` | Floating window overlay layer with z-order and ANSI positioning |
 | `plugin.go` | `PluginLoader`: Lua 5.1 VMs (full standard library), fsnotify hot-reload (debounced 500ms) |
-| `plugin_api.go` | `PluginAPI`: full `lain.*` Lua API surface (window, chat, session, state, log, command, keybind, exec) |
+| `plugin_api.go` | `PluginAPI`: full `lain.*` Lua API surface (window, chat, session, state, log, command, keybind, exec, interval timers) |
 | `llm.go` | LLM client, streaming, agentic loop, tool execution, idle watchdog |
 | `tools.go` | Built-in tools: `run_command`, `ask_question`, `extend_timeout`, `todo` |
 | `mcp.go` | MCP server manager (stdio JSON-RPC) |
@@ -137,7 +137,7 @@ type Window interface {
 - Plugins are `.lua` files in `~/.config/lain/plugins/`
 - Each plugin runs in a Lua 5.1 state with the full standard library (`base`, `string`, `table`, `math`, `coroutine`, `io`, `os`, `debug`, `package`)
 - fsnotify watches for changes — plugins hot-reload without restart
-- Plugins register windows, callbacks, slash commands, and keybindings via the `lain.*` API
+- Plugins register windows, callbacks, slash commands, keybindings, and periodic timers via the `lain.*` API
 - All Lua execution happens on the Bubble Tea update goroutine (thread-safe)
 
 #### Plugin auto-start

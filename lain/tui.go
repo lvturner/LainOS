@@ -1210,6 +1210,7 @@ func (m model) handleStreamEvent(event StreamEvent) (model, tea.Cmd) {
 		return m, nil
 	case "injected":
 		if len(m.chat.messageQueue) > 0 {
+			m.chat.messages = append(m.chat.messages, m.chat.messageQueue[0])
 			m.chat.messageQueue = m.chat.messageQueue[1:]
 		}
 	case "ask_question":
@@ -1513,7 +1514,7 @@ Available tools: run_command (use to cat, sed, or rewrite files).
 Plugin directory: ~/.config/lain/plugins/
 Plugin extension: .lua
 Available Lua libraries: string, table, math, coroutine, io, os, package (no debug)
-Plugin API: lain.window, lain.chat, lain.session, lain.state, lain.log, lain.command, lain.keybind`
+Plugin API: lain.window (register with id, title, render, update, interval, tick, float), lain.chat, lain.session, lain.state, lain.log, lain.command, lain.keybind`
 }
 
 type blankWindow struct {

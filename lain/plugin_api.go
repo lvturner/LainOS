@@ -55,6 +55,9 @@ type pluginWindow struct {
 	L            *lua.LState
 	renderFn     *lua.LFunction
 	updateFn     *lua.LFunction
+	interval     time.Duration
+	tickFn       *lua.LFunction
+	stopTick     chan struct{}
 	width        int
 	height       int
 	state        map[string]any
@@ -77,6 +80,7 @@ func newPluginWindow(id, title, pluginName string, L *lua.LState, renderFn, upda
 		L:           L,
 		renderFn:    renderFn,
 		updateFn:    updateFn,
+		stopTick:    make(chan struct{}),
 		state:       make(map[string]any),
 		api:         api,
 		renderDirty: true,
@@ -579,7 +583,46 @@ func (api *PluginAPI) luaWindowRegister(L *lua.LState, pluginName string, opts *
 	isFloat := getBoolField(L, opts, "float")
 
 	pw := newPluginWindow(id, title, pluginName, L, renderFn, updateFn, api)
+
+	if v := L.RawGet(opts, lua.LString("interval")); v != lua.LNil {
+		if n, ok := v.(lua.LNumber); ok && float64(n) > 0 {
+			pw.interval = time.Duration(float64(n)) * time.Millisecond
+		}
+	}
+	pw.tickFn = getFunctionField(L, opts, "tick")
+
+	if existing, ok := api.pluginWindows[id]; ok {
+		close(existing.stopTick)
+	}
 	api.pluginWindows[id] = pw
+
+	if pw.interval > 0 {
+		interval := pw.interval
+		tickFn := pw.tickFn
+		stopTick := pw.stopTick
+		exec := api.getExecutor(pluginName)
+		callbackTimeout := api.callbackTimeout
+		errCh := api.errCh
+		go func() {
+			for {
+				select {
+				case <-stopTick:
+					return
+				case <-time.After(interval):
+					if tickFn != nil && exec != nil {
+						_, err := exec.call(tickFn, nil, 0, callbackTimeout)
+						if err != nil && errCh != nil {
+							select {
+							case errCh <- PluginError{PluginName: pluginName, Error: err.Error(), Source: "tick", Timestamp: time.Now()}:
+							default:
+							}
+						}
+					}
+					pw.renderDirty = true
+				}
+			}
+		}()
+	}
 
 	if api.wm != nil {
 		if isFloat {
@@ -609,7 +652,11 @@ func (api *PluginAPI) luaWindowRegister(L *lua.LState, pluginName string, opts *
 }
 
 func (api *PluginAPI) luaWindowClose(id string) {
+	if pw, ok := api.pluginWindows[id]; ok {
+		close(pw.stopTick)
+	}
 	if api.wm == nil {
+		delete(api.pluginWindows, id)
 		return
 	}
 	if api.wm.HasFloating(id) {
