@@ -72,6 +72,7 @@ var (
 	todoDoneStyle        = lipgloss.NewStyle().Foreground(lipgloss.Color("60")).Faint(true)
 	todoEmptyStyle       = lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("243"))
 	normalModeStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("214"))
+	pluginStyle          = lipgloss.NewStyle().Foreground(lipgloss.Color("183")).Italic(true)
 )
 
 const todoSidebarW = 28
@@ -204,6 +205,7 @@ func (m model) Init() tea.Cmd {
 	cmds = append(cmds, waitForPluginError(m.pluginLoader.Errors()))
 	cmds = append(cmds, pluginRenderTick())
 	cmds = append(cmds, waitForPluginRenderResult(m.pluginAPI.RenderResultChannel()))
+	cmds = append(cmds, waitForPluginChatMsg(m.pluginAPI.ChatMsgChannel()))
 	return tea.Batch(cmds...)
 }
 
@@ -288,6 +290,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			pw.renderMu.Unlock()
 		}
 		return m, waitForPluginRenderResult(m.pluginAPI.RenderResultChannel())
+	case pluginChatSendMsg:
+		m.chat.messages = append(m.chat.messages, ChatMessage{
+			Role:   "plugin",
+			Blocks: []MessageBlock{{Type: "content", Content: msg.content}},
+		})
+		m.chat.vp.GotoBottom()
+		m.chat.refreshView()
+		return m, waitForPluginChatMsg(m.pluginAPI.ChatMsgChannel())
 	case pluginRenderTickMsg:
 		for _, pw := range m.pluginAPI.pluginWindows {
 			if pw.renderDirty && pw.executor != nil {
@@ -491,6 +501,26 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.mode = insertMode
 			m.textarea.Focus()
 			return m, nil
+		case "c", "C":
+			err := *m.pendingFixErr
+			m.pendingFixErr = nil
+			errMsg := fmt.Sprintf("Plugin %q failed with error: %s\nSource: %s\n\nRead the plugin file at ~/.config/lain/plugins/%s.lua and fix it.",
+				err.PluginName, err.Error, err.Source, err.PluginName)
+			m.chat.messages = append(m.chat.messages, ChatMessage{
+				Role:   "user",
+				Blocks: []MessageBlock{{Type: "content", Content: errMsg}},
+			})
+			m.pluginAPI.FireMessageCallbacks("user", errMsg)
+			m.streaming = true
+			m.chat.current = &ChatMessage{Role: "assistant"}
+			m.chat.vp.GotoBottom()
+			m.chat.refreshView()
+			ctx, cancel := context.WithCancel(context.Background())
+			m.cancelFn = cancel
+			m.streamCh = m.llmClient.Chat(ctx, errMsg)
+			m.mode = insertMode
+			m.textarea.Focus()
+			return m, tea.Batch(waitForStreamEvent(m.streamCh), m.spinner.Tick)
 		case "esc", "i":
 			m.pendingFixErr = nil
 			m.mode = insertMode
@@ -1039,7 +1069,7 @@ func (m model) View() string {
 			truncErr = truncErr[:60] + "..."
 		}
 		statusBar = errorStyle.Render(fmt.Sprintf(
-			"⚠ plugin %q: %s — F:fix  Esc:dismiss",
+			"⚠ plugin %q: %s — F:fix  C:chat  Esc:dismiss",
 			m.pendingFixErr.PluginName, truncErr))
 	} else if m.statusMsg != "" {
 		statusBar = statusStyle.Render("  " + m.statusMsg)
@@ -1362,6 +1392,13 @@ func formatMessage(msg ChatMessage, width int) string {
 				b.WriteString(compactionStyle.Render(fmt.Sprintf("⟳ %s", block.Content)))
 			case "error":
 				b.WriteString(errorStyle.Render(fmt.Sprintf("[error: %s]", block.Content)))
+			}
+		}
+	case "plugin":
+		for _, block := range msg.Blocks {
+			if block.Type == "content" {
+				wrapped := wordwrap.String(block.Content, width)
+				b.WriteString(pluginStyle.Render(wrapped))
 			}
 		}
 	}

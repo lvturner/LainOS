@@ -405,15 +405,28 @@ func (e *pluginExecutor) call(fn *lua.LFunction, args []lua.LValue, nRet int, ti
 }
 
 func (e *pluginExecutor) callAsync(fn *lua.LFunction, args []lua.LValue, nRet int, timeout time.Duration, errCh chan<- PluginError, pluginName, source string) {
+	retCh := make(chan pluginResult, 1)
 	c := pluginCall{
 		fn:      fn,
 		args:    args,
 		nRet:    nRet,
-		ret:     make(chan pluginResult, 1),
+		ret:     retCh,
 		timeout: timeout,
 	}
 	select {
 	case e.callCh <- c:
+		go func() {
+			select {
+			case r := <-retCh:
+				if r.err != nil && errCh != nil {
+					select {
+					case errCh <- PluginError{PluginName: pluginName, Error: r.err.Error(), Source: source, Timestamp: time.Now()}:
+					default:
+					}
+				}
+			case <-time.After(timeout + 100*time.Millisecond):
+			}
+		}()
 	default:
 		select {
 		case errCh <- PluginError{PluginName: pluginName, Error: "executor queue full", Source: source, Timestamp: time.Now()}:
@@ -424,6 +437,12 @@ func (e *pluginExecutor) callAsync(fn *lua.LFunction, args []lua.LValue, nRet in
 
 func (e *pluginExecutor) run() {
 	defer close(e.doneCh)
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("plugin executor panic", "error", r)
+			e.unhealthy = true
+		}
+	}()
 	for {
 		select {
 		case <-e.stopCh:
@@ -438,9 +457,11 @@ func (e *pluginExecutor) run() {
 			}, c.args...)
 			cancel()
 			var values []lua.LValue
-			for i := 0; i < c.nRet; i++ {
-				values = append(values, e.L.Get(-1))
-				e.L.Pop(1)
+			if err == nil {
+				for i := 0; i < c.nRet; i++ {
+					values = append(values, e.L.Get(-1))
+					e.L.Pop(1)
+				}
 			}
 			c.ret <- pluginResult{values: values, err: err}
 		case r := <-e.execResultCh:

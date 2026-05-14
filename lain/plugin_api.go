@@ -26,6 +26,20 @@ type pluginRenderMsg struct {
 
 type pluginRenderTickMsg time.Time
 
+type pluginChatSendMsg struct {
+	content string
+}
+
+func waitForPluginChatMsg(ch chan pluginChatSendMsg) tea.Cmd {
+	return func() tea.Msg {
+		msg, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return msg
+	}
+}
+
 type PluginAPI struct {
 	wm               *WindowManager
 	chat             *chatWindow
@@ -46,6 +60,7 @@ type PluginAPI struct {
 	callbackTimeout  time.Duration
 	loadTimeout      time.Duration
 	dataCallbacks    map[string][]luaCallback
+	chatMsgCh        chan pluginChatSendMsg
 }
 
 type pluginWindow struct {
@@ -196,6 +211,7 @@ func NewPluginAPI() *PluginAPI {
 		executors:        make(map[string]*pluginExecutor),
 		renderResultCh:   make(chan pluginRenderMsg, 32),
 		dataCallbacks:    make(map[string][]luaCallback),
+		chatMsgCh:        make(chan pluginChatSendMsg, 16),
 	}
 }
 
@@ -264,6 +280,10 @@ func (api *PluginAPI) getExecutor(pluginName string) *pluginExecutor {
 
 func (api *PluginAPI) RenderResultChannel() chan pluginRenderMsg {
 	return api.renderResultCh
+}
+
+func (api *PluginAPI) ChatMsgChannel() chan pluginChatSendMsg {
+	return api.chatMsgCh
 }
 
 func (api *PluginAPI) sendPluginError(pluginName, errMsg, source string) {
@@ -418,6 +438,14 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		}
 		L.Push(t)
 		return 1
+	}))
+	L.SetField(chatTable, "send", L.NewFunction(func(L *lua.LState) int {
+		content := L.CheckString(1)
+		select {
+		case api.chatMsgCh <- pluginChatSendMsg{content: content}:
+		default:
+		}
+		return 0
 	}))
 	L.SetField(lainTable, "chat", chatTable)
 
