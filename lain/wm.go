@@ -99,6 +99,18 @@ func (wm *WindowManager) SetSize(width, height int) {
 	wm.setsizeLocked(width, height)
 }
 
+func (wm *WindowManager) Width() int {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	return wm.width
+}
+
+func (wm *WindowManager) Height() int {
+	wm.mu.RLock()
+	defer wm.mu.RUnlock()
+	return wm.height
+}
+
 func (wm *WindowManager) setsizeLocked(width, height int) {
 	wm.width = width
 	wm.height = height

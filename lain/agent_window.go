@@ -3,9 +3,11 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/reflow/wordwrap"
@@ -21,6 +23,8 @@ type agentWindow struct {
 	streaming bool
 	done      bool
 	spinner   spinner.Model
+	vp        viewport.Model
+	vpMu      sync.RWMutex
 }
 
 var (
@@ -40,6 +44,7 @@ func newAgentWindow(id, title string) *agentWindow {
 		id:      id,
 		title:   title,
 		spinner: sp,
+		vp:      viewport.New(60, 20),
 	}
 }
 
@@ -49,6 +54,20 @@ func (w *agentWindow) Title() string { return w.title }
 func (w *agentWindow) SetSize(width, height int) {
 	w.width = width
 	w.height = height
+	if width <= 0 {
+		width = 60
+	}
+	if height <= 0 {
+		height = 20
+	}
+	w.vpMu.Lock()
+	wasAtBottom := w.vp.AtBottom()
+	w.vp = viewport.New(width, height)
+	w.vp.SetContent(w.renderContent())
+	if wasAtBottom {
+		w.vp.GotoBottom()
+	}
+	w.vpMu.Unlock()
 }
 
 func (w *agentWindow) IsDone() bool     { return w.done }
@@ -64,7 +83,11 @@ func (w *agentWindow) Update(msg tea.Msg) (Window, tea.Cmd) {
 		}
 		return w, nil
 	}
-	return w, nil
+	w.vpMu.Lock()
+	var cmd tea.Cmd
+	w.vp, cmd = w.vp.Update(msg)
+	w.vpMu.Unlock()
+	return w, cmd
 }
 
 func (w *agentWindow) AppendEvent(event StreamEvent) {
@@ -155,50 +178,62 @@ func (w *agentWindow) AppendEvent(event StreamEvent) {
 			w.current = &ChatMessage{Role: "user"}
 		}
 		w.current.Blocks = append(w.current.Blocks, MessageBlock{Type: "content", Content: event.Content})
+	case "user_message":
+		if w.current != nil {
+			w.messages = append(w.messages, *w.current)
+			w.current = nil
+		}
+		w.current = &ChatMessage{Role: "user"}
+		w.current.Blocks = append(w.current.Blocks, MessageBlock{Type: "content", Content: event.Content})
+		w.messages = append(w.messages, *w.current)
+		w.current = nil
 	}
+	w.refreshViewport()
 }
 
-func (w *agentWindow) View(width, height int, focused bool) string {
+func (w *agentWindow) refreshViewport() {
+	w.vpMu.Lock()
+	wasAtBottom := w.vp.AtBottom()
+	w.vp.SetContent(w.renderContent())
+	if wasAtBottom {
+		w.vp.GotoBottom()
+	}
+	w.vpMu.Unlock()
+}
+
+func (w *agentWindow) renderContent() string {
+	width := w.width
 	if width <= 0 {
 		width = 60
-	}
-	if height <= 0 {
-		height = 20
 	}
 
 	var b strings.Builder
 
 	for _, msg := range w.messages {
 		b.WriteString(w.formatMsg(msg, width))
+		b.WriteString("\n")
 	}
 
 	if w.current != nil {
 		b.WriteString(w.formatMsg(*w.current, width))
+		b.WriteString("\n")
 	}
 
 	if w.streaming {
-		b.WriteString(lipgloss.NewStyle().Faint(true).Render(w.spinner.View() + " working..."))
-		b.WriteString("\n")
+		b.WriteString(lipgloss.NewStyle().Faint(true).Render(w.spinner.View()+" working...") + "\n")
 	} else if w.done {
 		b.WriteString(agentDoneStyle.Render("✓ done"))
 		b.WriteString(lipgloss.NewStyle().Faint(true).Render(" (x to close)"))
 		b.WriteString("\n")
 	}
 
-	content := b.String()
-	lines := strings.Split(content, "\n")
+	return b.String()
+}
 
-	maxLines := height
-	if maxLines < 3 {
-		maxLines = 3
-	}
-	if len(lines) > maxLines {
-		start := len(lines) - maxLines
-		lines = lines[start:]
-	}
-	content = strings.Join(lines, "\n")
-
-	return content
+func (w *agentWindow) View(width, height int, focused bool) string {
+	w.vpMu.RLock()
+	defer w.vpMu.RUnlock()
+	return w.vp.View()
 }
 
 func (w *agentWindow) formatMsg(msg ChatMessage, width int) string {
@@ -216,51 +251,33 @@ func (w *agentWindow) formatMsg(msg ChatMessage, width int) string {
 				break
 			}
 		}
-		if len(content) > 120 {
-			content = content[:117] + "..."
-		}
 		wrapped := wordwrap.String(content, width-4)
+		top := agentUserStyle.Render("┌─ you " + strings.Repeat("─", max(0, width-8)) + "┐")
 		lines := strings.Split(wrapped, "\n")
-		if len(lines) > 4 {
-			lines = lines[:4]
-			lines = append(lines, "...")
-		}
+		mid := ""
 		for _, line := range lines {
-			b.WriteString(agentUserStyle.Render("▸ " + line))
-			b.WriteString("\n")
+			mid += agentUserStyle.Render("│ "+line) + "\n"
 		}
+		bot := agentUserStyle.Render("└" + strings.Repeat("─", max(0, width-2)) + "┘")
+		b.WriteString(top + "\n" + mid + bot)
 	case "assistant":
-		for _, block := range msg.Blocks {
+		for i, block := range msg.Blocks {
+			if i > 0 {
+				b.WriteString("\n")
+			}
 			switch block.Type {
 			case "content":
-				text := block.Content
-				if len(text) > 500 {
-					text = text[:497] + "..."
-				}
-				wrapped := wordwrap.String(text, width-2)
-				lines := strings.Split(wrapped, "\n")
-				if len(lines) > 8 {
-					lines = lines[:8]
-					lines = append(lines, "...")
-				}
-				for _, line := range lines {
-					b.WriteString(agentAsstStyle.Render(line))
-					b.WriteString("\n")
+				if !block.Done {
+					wrapped := wordwrap.String(block.Content, width)
+					b.WriteString(agentAsstStyle.Render(wrapped))
+				} else {
+					rendered := renderMarkdown(block.Content, width)
+					b.WriteString(rendered)
 				}
 			case "tool_call":
-				toolName := block.Name
-				if len(toolName) > width-4 {
-					toolName = toolName[:width-7] + "..."
-				}
-				b.WriteString(agentToolStyle.Render(fmt.Sprintf("▸ %s", toolName)))
-				b.WriteString("\n")
+				b.WriteString(agentToolStyle.Render(fmt.Sprintf("▸ %s", block.Name)))
 			case "error":
-				errText := block.Content
-				if len(errText) > width-4 {
-					errText = errText[:width-7] + "..."
-				}
-				b.WriteString(agentErrStyle.Render(fmt.Sprintf("✗ %s", errText)))
-				b.WriteString("\n")
+				b.WriteString(agentErrStyle.Render(fmt.Sprintf("[error: %s]", block.Content)))
 			}
 		}
 	}

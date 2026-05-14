@@ -20,6 +20,21 @@ type PluginsConfig struct {
 	LoadTimeout     time.Duration `yaml:"load_timeout"`
 }
 
+type SandboxConfig struct {
+	TmpSize string `yaml:"tmp_size"`
+}
+
+type AskModeToolsConfig struct {
+	Builtin    []string `yaml:"builtin"`
+	MCPServers []string `yaml:"mcp_servers"`
+}
+
+type AskModeConfig struct {
+	SystemPrompt string            `yaml:"system_prompt"`
+	Sandbox      SandboxConfig     `yaml:"sandbox"`
+	Tools        AskModeToolsConfig `yaml:"tools"`
+}
+
 type LainConfig struct {
 	APIURL              string        `yaml:"api_url"`
 	APIKey              string        `yaml:"api_key"`
@@ -38,6 +53,19 @@ type LainConfig struct {
 	PluginRenderTimeout   time.Duration  `yaml:"plugin_render_timeout"`
 	PluginCallbackTimeout time.Duration  `yaml:"plugin_callback_timeout"`
 	PluginLoadTimeout     time.Duration  `yaml:"plugin_load_timeout"`
+	AskMode               AskModeConfig  `yaml:"ask_mode"`
+}
+
+func (c *LainConfig) AskModeDefaults() {
+	if c.AskMode.SystemPrompt == "" {
+		c.AskMode.SystemPrompt = "You are a research assistant in read-only mode. You can read files, search the web, and execute read-only commands via the restricted_command tool. You cannot modify the filesystem — all paths are mounted read-only by the kernel. Use curl for web requests and standard file-reading tools (cat, grep, find, etc.) for inspection. If you need to download something, it can only go to /tmp which is ephemeral."
+	}
+	if c.AskMode.Sandbox.TmpSize == "" {
+		c.AskMode.Sandbox.TmpSize = "100m"
+	}
+	if len(c.AskMode.Tools.Builtin) == 0 {
+		c.AskMode.Tools.Builtin = []string{"restricted_command", "extend_timeout"}
+	}
 }
 
 type ServersConfig struct {

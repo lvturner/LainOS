@@ -2,6 +2,7 @@ package main
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	ansi "github.com/charmbracelet/x/ansi"
 )
@@ -9,26 +10,53 @@ import (
 func visualByteOffset(s string, targetCol int) int {
 	byteIdx := 0
 	visualCol := 0
-	runes := []rune(s)
 	for byteIdx < len(s) {
 		if s[byteIdx] == '\x1b' {
-			end := strings.IndexByte(s[byteIdx:], 'm')
-			if end != -1 {
-				end += byteIdx + 1
-				byteIdx = end
-				continue
-			}
+			end := ansiEscapeEnd(s, byteIdx)
+			byteIdx = end
+			continue
 		}
 		if visualCol >= targetCol {
 			return byteIdx
 		}
-		r := runes[0]
-		runes = runes[1:]
-		rWidth := ansi.StringWidth(string(r))
-		visualCol += rWidth
-		byteIdx += len(string(r))
+		_, rw := utf8.DecodeRuneInString(s[byteIdx:])
+		r := s[byteIdx : byteIdx+rw]
+		visualCol += ansi.StringWidth(r)
+		byteIdx += rw
 	}
 	return byteIdx
+}
+
+func ansiEscapeEnd(s string, start int) int {
+	i := start + 1
+	if i >= len(s) {
+		return i
+	}
+	switch s[i] {
+	case '[':
+		i++
+		for i < len(s) {
+			if s[i] >= 0x40 && s[i] <= 0x7e {
+				return i + 1
+			}
+			i++
+		}
+		return i
+	case ']':
+		i++
+		for i < len(s) {
+			if s[i] == 0x07 {
+				return i + 1
+			}
+			if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+				return i + 2
+			}
+			i++
+		}
+		return i
+	default:
+		return i + 1
+	}
 }
 
 func overlayLines(baseLines []string, overlayLines []string, x int, y int, termWidth int) []string {
@@ -64,7 +92,13 @@ func overlayLines(baseLines []string, overlayLines []string, x int, y int, termW
 			right = baseLine[rightOffset:]
 		}
 
-		result[targetRow] = left + overlayLine + right
+		paddedOverlay := overlayLine
+		if overlayVisualWidth < rightStart-x {
+			padNeeded := rightStart - x - overlayVisualWidth
+			paddedOverlay += strings.Repeat(" ", padNeeded)
+		}
+
+		result[targetRow] = left + paddedOverlay + right
 	}
 
 	return result

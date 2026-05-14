@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+
+	openai "github.com/sashabaranov/go-openai"
 )
 
 type SubAgentOpts struct {
@@ -12,6 +14,8 @@ type SubAgentOpts struct {
 	ProfileName  string
 	SystemPrompt string
 	InitialMsg   string
+	AskMode      bool
+	AskModeCfg   AskModeConfig
 }
 
 type SubAgent struct {
@@ -44,20 +48,42 @@ func (sam *SubAgentManager) Spawn(opts SubAgentOpts) (*SubAgent, error) {
 		return nil, fmt.Errorf("loading profile %q: %w", opts.ProfileName, err)
 	}
 
-	mcpMgr := NewMCPManager(profile.Servers)
-	registry := NewToolRegistry(mcpMgr)
-	registry.AddBuiltinTool(AskQuestionTool)
-	registry.AddBuiltinTool(TodoTool)
+	var mcpMgr *MCPManager
+	var registry *ToolRegistry
+	var tools []openai.Tool
 
-	client := NewLLMClient(profile.Config, opts.SystemPrompt, profile.AgentsPath, registry.AllTools(), registry)
+	if opts.AskMode {
+		mcpMgr = NewMCPManager(filterMCPServers(profile.Servers, opts.AskModeCfg.Tools.MCPServers))
+		registry = NewToolRegistry(mcpMgr)
+		registry.AddBuiltinTool(RestrictedCommandTool)
+		sandbox := NewSandboxedExecutor(opts.AskModeCfg.Sandbox.TmpSize)
+		tools = registry.FilteredTools(opts.AskModeCfg.Tools.Builtin, opts.AskModeCfg.Tools.MCPServers)
+		registry.SetAllowedTools(opts.AskModeCfg.Tools.Builtin, sandbox)
+	} else {
+		mcpMgr = NewMCPManager(profile.Servers)
+		registry = NewToolRegistry(mcpMgr)
+		registry.AddBuiltinTool(AskQuestionTool)
+		registry.AddBuiltinTool(TodoTool)
+		tools = registry.AllTools()
+	}
+
+	client := NewLLMClient(profile.Config, opts.SystemPrompt, profile.AgentsPath, tools, registry)
 
 	win := newAgentWindow(opts.ID, opts.Title)
 	win.streaming = true
 
-	agentW := 60
-	agentH := 20
-	x := (sam.model.width - agentW) / 2
-	y := (sam.model.wmHeight() - agentH) / 2
+	termW := sam.model.wm.Width()
+	termH := sam.model.wm.Height()
+	agentW := termW * 9 / 10
+	agentH := termH * 4 / 5
+	if agentW < 40 {
+		agentW = 40
+	}
+	if agentH < 10 {
+		agentH = 10
+	}
+	x := (termW - agentW) / 2
+	y := (termH - agentH) / 2
 	if x < 0 {
 		x = 0
 	}
@@ -65,6 +91,8 @@ func (sam *SubAgentManager) Spawn(opts SubAgentOpts) (*SubAgent, error) {
 		y = 0
 	}
 	sam.model.wm.AddFloating(win, x, y, agentW, agentH)
+	sam.model.wm.SetFocused(opts.ID)
+	sam.model.wm.BringToFront(opts.ID)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	streamCh := client.Chat(ctx, opts.InitialMsg)
@@ -93,6 +121,26 @@ func (sam *SubAgentManager) EnqueueMessage(agentID, message string) {
 	if agent.window != nil {
 		agent.window.AppendEvent(StreamEvent{Type: "injected", Content: message})
 	}
+}
+
+func (sam *SubAgentManager) SendMessage(agentID, message string) (<-chan StreamEvent, error) {
+	agent, ok := sam.agents[agentID]
+	if !ok {
+		return nil, fmt.Errorf("agent %q not found", agentID)
+	}
+	if agent.cancelFn != nil {
+		agent.cancelFn()
+	}
+	if agent.window != nil {
+		agent.window.AppendEvent(StreamEvent{Type: "done"})
+		agent.window.AppendEvent(StreamEvent{Type: "user_message", Content: message})
+		agent.window.streaming = true
+		agent.window.done = false
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	agent.cancelFn = cancel
+	agent.streamCh = agent.client.Chat(ctx, message)
+	return agent.streamCh, nil
 }
 
 func (sam *SubAgentManager) Stop(agentID string) {

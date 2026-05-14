@@ -111,7 +111,7 @@ type model struct {
 
 func NewTUI(profileName string, profile *Profile, registry *ToolRegistry) model {
 	ta := textarea.New()
-	ta.Placeholder = "Type your message... (/new /sessions /save /rename /compact /plugins /windows)"
+	ta.Placeholder = "Type your message... (/new /sessions /save /rename /compact /ask /plugins /windows)"
 	ta.Prompt = "> "
 	ta.CharLimit = 0
 	ta.SetHeight(1)
@@ -252,14 +252,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForPluginEvent(m.pluginLoader.Events())
 	case pluginErrorMsg:
+		var cmd tea.Cmd
 		if m.profile.Config.SubAgent.AutoFix {
-			m.spawnFixAgent(msg.err)
+			cmd = m.spawnFixAgent(msg.err)
 		} else {
 			m.pendingFixErr = &msg.err
 			m.mode = normalMode
 			m.textarea.Blur()
 		}
-		return m, waitForPluginError(m.pluginLoader.Errors())
+		return m, tea.Batch(cmd, waitForPluginError(m.pluginLoader.Errors()))
 	case subAgentEventMsg:
 		agent := m.subAgentMgr.agents[msg.agentID]
 		if agent != nil && agent.window != nil {
@@ -420,6 +421,18 @@ func (m model) handleInsertKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.handleSlashCommand(input)
 		}
 
+		focusedID := m.wm.FocusedID()
+		if focusedID != "" && focusedID != "chat" && focusedID != "todo" && m.subAgentMgr.HasActive(focusedID) {
+			m.textarea.Reset()
+			ch, err := m.subAgentMgr.SendMessage(focusedID, input)
+			if err != nil {
+				m.statusMsg = fmt.Sprintf("Error: %s", err)
+				m.refreshView()
+				return m, m.clearStatus()
+			}
+			return m, waitForSubAgentEvent(focusedID, ch)
+		}
+
 		m.textarea.Reset()
 		m.chat.messages = append(m.chat.messages, ChatMessage{
 			Role:   "user",
@@ -497,10 +510,10 @@ func (m model) handleNormalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "f", "F":
 			err := *m.pendingFixErr
 			m.pendingFixErr = nil
-			m.spawnFixAgent(err)
+			cmd := m.spawnFixAgent(err)
 			m.mode = insertMode
 			m.textarea.Focus()
-			return m, nil
+			return m, cmd
 		case "c", "C":
 			err := *m.pendingFixErr
 			m.pendingFixErr = nil
@@ -857,6 +870,37 @@ func (m model) handleSlashCommand(input string) (tea.Model, tea.Cmd) {
 		}
 		m.refreshView()
 		return m, m.clearStatus()
+	case "/ask":
+		question := ""
+		if len(parts) >= 2 {
+			question = strings.Join(parts[1:], " ")
+		}
+		if strings.TrimSpace(question) == "" {
+			m.statusMsg = "Usage: /ask <question>"
+			m.refreshView()
+			return m, m.clearStatus()
+		}
+		m.profile.Config.AskModeDefaults()
+		cfg := m.profile.Config.AskMode
+		agentID := fmt.Sprintf("ask-%d", time.Now().UnixNano())
+		opts := SubAgentOpts{
+			ID:           agentID,
+			Title:        "Ask: " + question,
+			ProfileName:  m.profileName,
+			SystemPrompt: cfg.SystemPrompt,
+			InitialMsg:   question,
+			AskMode:      true,
+			AskModeCfg:   cfg,
+		}
+		agent, err := m.subAgentMgr.Spawn(opts)
+		if err != nil {
+			m.statusMsg = fmt.Sprintf("Failed to spawn ask agent: %s", err)
+			m.refreshView()
+			return m, m.clearStatus()
+		}
+		m.statusMsg = "Ask agent started"
+		m.refreshView()
+		return m, tea.Batch(waitForSubAgentEvent(agent.id, agent.streamCh), m.clearStatus())
 	default:
 		pluginCmds := m.pluginAPI.GetCommandCallbacks()
 		if fn, ok := pluginCmds[cmd]; ok {
@@ -1084,7 +1128,13 @@ func (m model) View() string {
 		statusBar = ctxStyle.Render("  " + ctxLabel)
 	}
 
-	inputArea := inputStyle.Render(m.textarea.View())
+	inputArea := m.textarea.View()
+	focusedID := m.wm.FocusedID()
+	if focusedID != "" && focusedID != "chat" && focusedID != "todo" && m.subAgentMgr.HasActive(focusedID) {
+		agentPrompt := lipgloss.NewStyle().Foreground(lipgloss.Color("213")).Bold(true).Render("▸ ask ")
+		inputArea = strings.Replace(inputArea, "> ", agentPrompt, 1)
+	}
+	inputArea = inputStyle.Render(inputArea)
 
 	parts := []string{banner, m.wm.View()}
 	if m.chat.newBelow {
@@ -1498,7 +1548,7 @@ func waitForSubAgentEvent(agentID string, ch <-chan StreamEvent) tea.Cmd {
 	}
 }
 
-func (m *model) spawnFixAgent(pluginErr PluginError) {
+func (m *model) spawnFixAgent(pluginErr PluginError) tea.Cmd {
 	if m.subAgentMgr.HasActive(m.fixAgentID) {
 		m.subAgentMgr.EnqueueMessage(m.fixAgentID,
 			fmt.Sprintf("New plugin error:\nPlugin: %s\nError: %s\nSource: %s",
@@ -1506,7 +1556,7 @@ func (m *model) spawnFixAgent(pluginErr PluginError) {
 		m.notifications.Add(
 			fmt.Sprintf("Error queued for plugin %q", pluginErr.PluginName),
 			5*time.Second)
-		return
+		return nil
 	}
 
 	profileName := m.profile.Config.SubAgent.Profile
@@ -1525,7 +1575,7 @@ func (m *model) spawnFixAgent(pluginErr PluginError) {
 	if err != nil {
 		m.statusMsg = "Failed to spawn fix agent: " + err.Error()
 		m.refreshView()
-		return
+		return nil
 	}
 
 	m.fixAgentID = agent.id
@@ -1534,6 +1584,7 @@ func (m *model) spawnFixAgent(pluginErr PluginError) {
 	m.notifications.Add(
 		fmt.Sprintf("Fix agent spawned for plugin %q", pluginErr.PluginName),
 		5*time.Second)
+	return waitForSubAgentEvent(agent.id, agent.streamCh)
 }
 
 func buildFixAgentPrompt() string {

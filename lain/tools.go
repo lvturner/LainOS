@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -167,12 +168,99 @@ var PluginSendTool = openai.Tool{
 	},
 }
 
+var RestrictedCommandTool = openai.Tool{
+	Type: openai.ToolTypeFunction,
+	Function: &openai.FunctionDefinition{
+		Name:        "restricted_command",
+		Description: "Execute a command in a read-only sandbox. The entire filesystem is mounted read-only by the kernel — writes will fail with EROFS. Only /tmp is writable (ephemeral, size-limited tmpfs). Network access is available for curl and HTTP requests. Use this for file inspection, web requests, and read-only operations.",
+		Parameters: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"command": map[string]any{
+					"type":        "string",
+					"description": "The shell command to execute (read-only sandbox)",
+				},
+			},
+			"required": []string{"command"},
+		},
+	},
+}
+
+var knownBuiltinTools = map[string]bool{
+	"run_command":         true,
+	"restricted_command":  true,
+	"ask_question":        true,
+	"extend_timeout":      true,
+	"todo":                true,
+	"plugin_query":        true,
+	"plugin_send":         true,
+}
+
+type SandboxedExecutor struct {
+	BwrapPath string
+	TmpSize   string
+}
+
+func NewSandboxedExecutor(tmpSize string) *SandboxedExecutor {
+	return &SandboxedExecutor{
+		BwrapPath: "bwrap",
+		TmpSize:   tmpSize,
+	}
+}
+
+func (se *SandboxedExecutor) Exec(ctx context.Context, command string, stdinData []byte) (string, int, error) {
+	args := []string{
+		"--ro-bind", "/", "/",
+		"--dev", "/dev",
+		"--proc", "/proc",
+		"--tmpfs", "/tmp:size=" + se.TmpSize,
+		"--unshare-pid",
+		"--unshare-ipc",
+		"--unshare-cgroup",
+		"--die-with-parent",
+		"--new-session",
+		"--", "sh", "-c", command,
+	}
+	cmd := exec.CommandContext(ctx, se.BwrapPath, args...)
+	if len(stdinData) > 0 {
+		cmd.Stdin = strings.NewReader(string(stdinData))
+	}
+	output, err := cmd.CombinedOutput()
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			return "", -1, fmt.Errorf("sandbox execution error: %w", err)
+		}
+	}
+	return string(output), exitCode, nil
+}
+
+func (se *SandboxedExecutor) IsAvailable() bool {
+	_, err := exec.LookPath(se.BwrapPath)
+	if err != nil {
+		home, _ := os.UserHomeDir()
+		if home != "" {
+			candidate := home + "/.nix-profile/bin/bwrap"
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				se.BwrapPath = candidate
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+
 type ToolRegistry struct {
 	builtinTools []openai.Tool
 	mcpTools     []openai.Tool
 	mcpManager   *MCPManager
 	todoStore    *TodoStore
 	pluginAPI    *PluginAPI
+	allowedTools []string
+	sandbox      *SandboxedExecutor
 }
 
 func NewToolRegistry(mgr *MCPManager) *ToolRegistry {
@@ -199,6 +287,11 @@ func (r *ToolRegistry) GetTodoStore() *TodoStore {
 	return r.todoStore
 }
 
+func (r *ToolRegistry) SetAllowedTools(allowed []string, sandbox *SandboxedExecutor) {
+	r.allowedTools = allowed
+	r.sandbox = sandbox
+}
+
 func (r *ToolRegistry) AllTools() []openai.Tool {
 	tools := make([]openai.Tool, 0, len(r.builtinTools)+len(r.mcpTools))
 	tools = append(tools, r.builtinTools...)
@@ -206,7 +299,66 @@ func (r *ToolRegistry) AllTools() []openai.Tool {
 	return tools
 }
 
+func (r *ToolRegistry) FilteredTools(builtinAllow []string, mcpAllow []string) []openai.Tool {
+	var tools []openai.Tool
+	builtinSet := make(map[string]bool, len(builtinAllow))
+	for _, name := range builtinAllow {
+		builtinSet[name] = true
+	}
+	for _, t := range r.builtinTools {
+		if builtinSet[t.Function.Name] {
+			tools = append(tools, t)
+		}
+	}
+	if len(mcpAllow) > 0 {
+		for _, t := range r.mcpTools {
+			for _, server := range mcpAllow {
+				if strings.HasPrefix(t.Function.Name, server+"__") {
+					tools = append(tools, t)
+					break
+				}
+			}
+		}
+	}
+	return tools
+}
+
 func (r *ToolRegistry) ExecuteTool(name string, args json.RawMessage) (string, error) {
+	if r.allowedTools != nil {
+		allowed := false
+		for _, a := range r.allowedTools {
+			if name == a {
+				allowed = true
+				break
+			}
+			if strings.Contains(name, "__") && strings.HasPrefix(name, a+"__") {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			if knownBuiltinTools[name] {
+				return fmt.Sprintf(
+					"Tool '%s' is not available in ask mode. You are in a read-only research mode. Available tools: %s. Use 'restricted_command' for read-only file inspection and web requests.",
+					name, strings.Join(r.allowedTools, ", "),
+				), nil
+			}
+			serverName, _, parseErr := r.mcpManager.ParseToolName(name)
+			if parseErr == nil && serverName != "" {
+				return fmt.Sprintf(
+					"Tool '%s' is not available in ask mode (server '%s' is not allowlisted). Available tools: %s.",
+					name, serverName, strings.Join(r.allowedTools, ", "),
+				), nil
+			}
+			return fmt.Sprintf(
+				"Unknown tool '%s'. Available tools: %s",
+				name, strings.Join(r.allowedTools, ", "),
+			), nil
+		}
+	}
+	if name == "restricted_command" {
+		return r.executeRestrictedCommand(args)
+	}
 	if name == "run_command" {
 		return r.executeRunCommand(args)
 	}
@@ -258,6 +410,29 @@ func (r *ToolRegistry) executeRunCommand(args json.RawMessage) (string, error) {
 	cmd := exec.CommandContext(ctx, "sh", "-c", a.Command)
 	output, _ := cmd.CombinedOutput()
 	return string(output), nil
+}
+
+func (r *ToolRegistry) executeRestrictedCommand(args json.RawMessage) (string, error) {
+	var a commandArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return "", fmt.Errorf("parsing args: %w", err)
+	}
+	if r.sandbox == nil {
+		return "", fmt.Errorf("sandbox executor not configured")
+	}
+	if !r.sandbox.IsAvailable() {
+		return "", fmt.Errorf("bubblewrap (bwrap) is not installed. Install via: nix profile install nixpkgs#bubblewrap")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	output, exitCode, err := r.sandbox.Exec(ctx, a.Command, nil)
+	if err != nil {
+		return "", err
+	}
+	if exitCode != 0 {
+		return output, fmt.Errorf("exit code %d", exitCode)
+	}
+	return output, nil
 }
 
 type todoArgs struct {
