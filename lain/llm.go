@@ -42,6 +42,7 @@ type LLMClient struct {
 	compactionCount     int
 	thresholdBoost      int
 	lastUsage           *openai.Usage
+	loopDetector        *LoopDetector
 }
 
 func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools []openai.Tool, registry *ToolRegistry) *LLMClient {
@@ -63,6 +64,7 @@ func NewLLMClient(cfg *LainConfig, systemPrompt string, agentsPath string, tools
 		maxNudges:           cfg.MaxNudges,
 		nudgeMessage:        cfg.NudgeMessage,
 		noStream:            cfg.NoStream,
+		loopDetector:        NewLoopDetector(cfg.LoopThreshold),
 	}
 }
 
@@ -146,6 +148,7 @@ func (c *LLMClient) Chat(ctx context.Context, userMsg string) <-chan StreamEvent
 	c.injectCh = make(chan string, 20)
 	c.compactionCount = 0
 	c.thresholdBoost = 0
+	c.loopDetector.Reset()
 	c.reloadAgents()
 	c.history = append(c.history, openai.ChatCompletionMessage{
 		Role:    openai.ChatMessageRoleUser,
@@ -380,6 +383,35 @@ outer:
 		}
 		c.history = append(c.history, assistantMsg)
 		if len(toolCalls) > 0 {
+			tcList := make([]openai.ToolCall, len(indices))
+			for i, idx := range indices {
+				tcList[i] = *toolCalls[idx]
+			}
+
+			if c.loopDetector.Enabled() {
+				iterDetected, iterCount := c.loopDetector.CheckIteration(tcList)
+				if iterDetected {
+					slog.Warn("iteration-level loop detected", "count", iterCount, "tool_count", len(tcList))
+					ch <- StreamEvent{
+						Type:    "loop_detected",
+						Content: fmt.Sprintf("Iteration loop: same tool call set repeated %d times", iterCount),
+					}
+					for _, idx := range indices {
+						tc := toolCalls[idx]
+						c.history = append(c.history, openai.ChatCompletionMessage{
+							Role:       openai.ChatMessageRoleTool,
+							Content:    fmt.Sprintf("LOOP DETECTED: You have made the same set of tool calls %d times in a row. The tool was not executed. Please try a completely different approach.", iterCount),
+							ToolCallID: tc.ID,
+						})
+					}
+					c.history = append(c.history, openai.ChatCompletionMessage{
+						Role:    openai.ChatMessageRoleUser,
+						Content: fmt.Sprintf("[System] You are stuck in a loop. You have repeated the same set of tool calls %d consecutive times. Stop repeating yourself and try a completely different approach to solve this problem.", iterCount),
+					})
+					continue outer
+				}
+			}
+
 			for _, idx := range indices {
 				select {
 				case <-ctx.Done():
@@ -393,6 +425,24 @@ outer:
 					Type:    "tool_start",
 					Content: fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments),
 				}
+
+				if c.loopDetector.Enabled() {
+					callDetected, callCount := c.loopDetector.CheckToolCall(tc.Function.Name, tc.Function.Arguments)
+					if callDetected {
+						slog.Warn("per-call loop detected", "tool", tc.Function.Name, "count", callCount)
+						ch <- StreamEvent{
+							Type:    "loop_detected",
+							Content: fmt.Sprintf("Call loop: %s repeated %d times", tc.Function.Name, callCount),
+						}
+						c.history = append(c.history, openai.ChatCompletionMessage{
+							Role:       openai.ChatMessageRoleTool,
+							Content:    fmt.Sprintf("LOOP DETECTED: You have called %s with the same arguments %d times in a row. This tool call was not executed. Please try a different approach.", tc.Function.Name, callCount),
+							ToolCallID: tc.ID,
+						})
+						continue
+					}
+				}
+
 				args := json.RawMessage(tc.Function.Arguments)
 				if len(args) == 0 {
 					args = json.RawMessage("{}")

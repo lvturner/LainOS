@@ -48,6 +48,7 @@ type LainConfig struct {
 	MaxNudges           int           `yaml:"max_nudges"`
 	NudgeMessage        string        `yaml:"nudge_message"`
 	NoStream            bool          `yaml:"no_stream"`
+	LoopThreshold       int           `yaml:"loop_threshold"`
 	SubAgent              SubAgentConfig `yaml:"sub_agent"`
 	Plugins               PluginsConfig  `yaml:"plugins"`
 	PluginRenderTimeout   time.Duration  `yaml:"plugin_render_timeout"`
@@ -104,6 +105,9 @@ func LoadConfig(path string) (*LainConfig, error) {
 	}
 	if cfg.NudgeMessage == "" {
 		cfg.NudgeMessage = "You haven't produced output in a while. If you're about to run something slow, use extend_timeout. Otherwise, continue your task."
+	}
+	if cfg.LoopThreshold == 0 {
+		cfg.LoopThreshold = 3
 	}
 	if cfg.Plugins.RenderTimeout == 0 {
 		cfg.Plugins.RenderTimeout = cfg.PluginRenderTimeout
