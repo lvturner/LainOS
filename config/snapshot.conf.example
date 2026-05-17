@@ -1,5 +1,11 @@
 SNAPSHOT_INTERVAL=3600
 SNAPSHOT_SOURCE="/home/lainos"
 SNAPSHOT_DIR="/snapshots"
+# Retention policy (applied hourly by cleanup timer):
+#   < 1 hour: keep all
+#   < 24 hours: keep 1 per hour
+#   < 7 days: keep 1 per day
+#   < SNAPSHOT_RETENTION_DAYS: keep 1 per week
+#   > SNAPSHOT_RETENTION_DAYS: delete
 SNAPSHOT_RETENTION_DAYS=30
 SNAPSHOT_EXCLUDE="\.cache|\.camofox|\.camoufox|\.npm|\.local|\.fontconfig|/tmp"

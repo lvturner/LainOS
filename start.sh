@@ -149,6 +149,7 @@ temperature: ${temperature}
 max_tokens: 4096
 context_length: 128000
 YAML
+        chmod 600 "$LAIN_DIR/config.yaml"
         echo -e "  ${GREEN}created${RESET} lain default profile config"
     fi
 else
@@ -169,7 +170,6 @@ echo -e "${BOLD}  ── matching host UID ────────────�
 echo ""
 
 HOST_UID=$(id -u)
-sed -i "s/-u [0-9]\+/-u ${HOST_UID}/" Containerfile
 echo -e "  ${GREEN}set${RESET} lainos UID to ${HOST_UID}"
 
 HOST_TZ=$(timedatectl show -p Timezone --value 2>/dev/null || readlink -f /etc/localtime | sed 's|.*/zoneinfo/||')
@@ -182,6 +182,9 @@ fi
 cat > compose.override.yaml <<EOF
 services:
   lainos:
+    build:
+      args:
+        HOST_UID: "${HOST_UID}"
     environment:
       TZ: "${HOST_TZ}"${VOLUME_OPTS}
 EOF

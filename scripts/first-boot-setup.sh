@@ -39,9 +39,4 @@ echo "$PASSWORD" > /var/lib/lainos/.password
 chmod 600 /var/lib/lainos/.password
 touch /var/lib/lainos/.setup-complete
 
-echo "============================================"
-echo " lainos SSH credentials:"
-echo "   User:     lainos"
-echo "   Password: $PASSWORD"
-echo "   Port:     22"
-echo "============================================"
+echo "SSH credentials saved to /var/lib/lainos/.password"

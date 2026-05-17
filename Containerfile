@@ -70,7 +70,8 @@ RUN rpm-ostree install \
     /tmp/rpms/camofox-*.rpm \
     && rm -rf /tmp/rpms
 
-RUN useradd -m -u 1000 -s /bin/bash lainos && \
+ARG HOST_UID=1000
+RUN useradd -m -u ${HOST_UID} -s /bin/bash lainos && \
     mkdir -p /home/lainos/.config /home/lainos/.local /home/lainos/config /home/lainos/workspace /home/lainos/workspace/logs && \
     chown -R lainos:lainos /home/lainos/.config /home/lainos/.local /home/lainos/config /home/lainos/workspace
 
@@ -121,8 +122,10 @@ COPY scripts/init-wrapper.sh /usr/local/bin/init-wrapper.sh
 COPY scripts/home-snapshot.sh /usr/local/bin/home-snapshot.sh
 COPY scripts/home-snapshot-watch.sh /usr/local/bin/home-snapshot-watch.sh
 COPY scripts/home-snapshot-cleanup.sh /usr/local/bin/home-snapshot-cleanup.sh
+COPY scripts/home-restore.sh /usr/local/bin/home-restore.sh
 RUN chmod +x /usr/local/bin/fix-home-permissions.sh /usr/local/bin/first-boot-setup.sh /usr/local/bin/init-wrapper.sh \
-    /usr/local/bin/home-snapshot.sh /usr/local/bin/home-snapshot-watch.sh /usr/local/bin/home-snapshot-cleanup.sh
+    /usr/local/bin/home-snapshot.sh /usr/local/bin/home-snapshot-watch.sh /usr/local/bin/home-snapshot-cleanup.sh \
+    /usr/local/bin/home-restore.sh
 
 RUN cp -a /home/lainos /etc/skel-lainos
 

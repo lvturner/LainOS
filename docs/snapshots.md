@@ -34,7 +34,7 @@ After migration, verify inside the container:
 btrfs subvolume show /home/lainos
 # Should print subvolume details
 
-systemctl --user status home-snapshot
+systemctl status home-snapshot
 # Should show active (running)
 ```
 
@@ -53,7 +53,7 @@ SNAPSHOT_EXCLUDE="\.cache|\.camofox|\.camoufox|\.npm|\.local|\.fontconfig|/tmp"
 Apply changes:
 
 ```bash
-systemctl --user restart home-snapshot
+systemctl restart home-snapshot
 ```
 
 ### Options
@@ -94,26 +94,41 @@ ls -la /snapshots/
 # dr-xr-xr-x. 1 root root 0 May  5 09:00 home-2026-05-05T09-00-00
 ```
 
-### Restore a file
+Or use the restore tool:
 
 ```bash
-cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/path/to/file ~/path/to/file
+home-restore.sh --list
 ```
 
-### Restore a directory
+### Restore a file or directory
 
 ```bash
-cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/.config ~/.config
+home-restore.sh --restore /snapshots/home-2026-05-05T08-00-00 path/to/file
 ```
 
-### Restore everything (nuclear option)
+This copies from the snapshot using `--reflink=auto` (zero-cost on btrfs).
+
+### Restore everything (full restore)
+
+> **Warning:** This stops all services, replaces the entire home directory contents, then restarts services. Active sessions, in-progress writes, and running databases will be interrupted. Use `--dry-run` first to preview changes.
 
 ```bash
-# From inside the container, as root:
-rsync -a --delete /snapshots/home-2026-05-05T08-00-00/ /home/lainos/
+home-restore.sh --full /snapshots/home-2026-05-05T08-00-00
+```
+
+Use `--dry-run` first to preview changes:
+
+```bash
+home-restore.sh --dry-run --full /snapshots/home-2026-05-05T08-00-00
 ```
 
 ### Compare current state vs snapshot
+
+```bash
+home-restore.sh --diff /snapshots/home-2026-05-05T08-00-00
+```
+
+Or manually:
 
 ```bash
 diff -r /snapshots/home-2026-05-05T08-00-00/workspace ~/workspace
@@ -128,7 +143,43 @@ diff -r /snapshots/home-2026-05-05T08-00-00/workspace ~/workspace
 ### Trigger cleanup immediately
 
 ```bash
-systemctl --user start home-snapshot-cleanup
+systemctl start home-snapshot-cleanup
+```
+
+## Restore Tool
+
+`home-restore.sh` provides safe snapshot restore operations:
+
+| Command | Description |
+|---|---|
+| `--list` | List available snapshots with timestamps |
+| `--diff <snapshot>` | Show changed files between snapshot and current state |
+| `--restore <snapshot> <path>` | Restore a single file/directory |
+| `--full <snapshot>` | Full restore: stop services, rsync, restart services |
+| `--dry-run` | Preview any operation without making changes |
+
+All destructive operations require confirmation unless `--yes` is passed.
+
+### Examples
+
+```bash
+# List snapshots
+home-restore.sh --list
+
+# See what changed
+home-restore.sh --diff /snapshots/home-2026-05-15T12-00-00
+
+# Restore a single file
+home-restore.sh --restore /snapshots/home-2026-05-15T12-00-00 .bashrc
+
+# Restore a directory
+home-restore.sh --restore /snapshots/home-2026-05-15T12-00-00 .config
+
+# Full restore (stops services, restores everything, restarts)
+home-restore.sh --full /snapshots/home-2026-05-15T12-00-00
+
+# Preview a full restore
+home-restore.sh --dry-run --full /snapshots/home-2026-05-15T12-00-00
 ```
 
 ## Retention Policy
@@ -138,9 +189,9 @@ Cleanup runs hourly and applies these tiers:
 | Age | Policy |
 |---|---|
 | < 1 hour | Keep all |
-| < 24 hours | Keep 1 per hour (top of hour) |
-| < 7 days | Keep 1 per day (midnight) |
-| < 30 days | Keep 1 per week (Sunday midnight) |
+| < 24 hours | Keep 1 per hour (closest to HH:00:00) |
+| < 7 days | Keep 1 per day (closest to 00:00:00) |
+| < 30 days | Keep 1 per week (closest to Sunday 00:00:00) |
 | > 30 days | Delete |
 
 To change retention period, set `SNAPSHOT_RETENTION_DAYS` in `snapshot.conf`.
@@ -163,24 +214,26 @@ These directories ARE still included in snapshots when a snapshot is taken — t
 
 ## Service Management
 
+The snapshot services run as **system services** (not user services). Use `systemctl` without `--user`:
+
 ```bash
 # Check watcher status
-systemctl --user status home-snapshot
+systemctl status home-snapshot
 
 # Restart watcher (after config change)
-systemctl --user restart home-snapshot
+systemctl restart home-snapshot
 
 # View watcher logs
-journalctl --user -u home-snapshot -f
+journalctl -u home-snapshot -f
 
 # Check cleanup timer schedule
-systemctl --user list-timers home-snapshot-cleanup
+systemctl list-timers home-snapshot-cleanup
 
 # Trigger cleanup now
-systemctl --user start home-snapshot-cleanup
+systemctl start home-snapshot-cleanup
 
 # View cleanup logs
-journalctl --user -u home-snapshot-cleanup -f
+journalctl -u home-snapshot-cleanup -f
 ```
 
 ## Troubleshooting
@@ -209,20 +262,20 @@ Decrease the retention period or increase the interval:
 # In ~/config/snapshot.conf:
 SNAPSHOT_INTERVAL=7200           # every 2 hours
 SNAPSHOT_RETENTION_DAYS=7        # keep only 7 days
-systemctl --user restart home-snapshot
+systemctl restart home-snapshot
 ```
 
 Then trigger immediate cleanup:
 ```bash
-systemctl --user start home-snapshot-cleanup
+systemctl start home-snapshot-cleanup
 ```
 
 ### Snapshot watcher not running
 
 Check service status and logs:
 ```bash
-systemctl --user status home-snapshot
-journalctl --user -u home-snapshot --no-pager -n 50
+systemctl status home-snapshot
+journalctl -u home-snapshot --no-pager -n 50
 ```
 
 Common causes:

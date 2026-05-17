@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Camofox provides an anti-detection headless browser server for AI agents. Automatic btrfs snapshots of the home directory. Config is YAML with hot-reload. Full plan lives in `PLAN.md`.
+Webhook HTTP gateway written in Go, running as a single privileged systemd container on ucore-minimal (Fedora CoreOS). Routes incoming webhooks to user-defined commands. Cloudflared tunnels external traffic in. Camofox provides an anti-detection headless browser server for AI agents. Automatic btrfs snapshots of the home directory. Config is YAML with hot-reload. Development plans live in `PLAN-*.md` files.
 
 ## Tech Stack
 
@@ -253,7 +253,7 @@ The home directory (`/home/lainos`) is a btrfs subvolume, automatically snapshot
 - **Config**: `/home/lainos/config/snapshot.conf` (sourced shell vars, reconfigurable at runtime)
 - **Watcher**: `home-snapshot.service` runs `home-snapshot-watch.sh` (inotifywait + debounce)
 - **Cleanup**: `home-snapshot-cleanup.timer` runs hourly, applies tiered retention (30 days)
-- **Snapshot scripts**: `scripts/home-snapshot.sh`, `scripts/home-snapshot-watch.sh`, `scripts/home-snapshot-cleanup.sh`
+- **Snapshot scripts**: `scripts/home-snapshot.sh`, `scripts/home-snapshot-watch.sh`, `scripts/home-snapshot-cleanup.sh`, `scripts/home-restore.sh`
 - **One-time migration**: `scripts/migrate-to-subvolume.sh` (run on host before first use)
 
 ### Key config variables
@@ -266,7 +266,7 @@ The home directory (`/home/lainos`) is a btrfs subvolume, automatically snapshot
 | `SNAPSHOT_RETENTION_DAYS` | `30` | Max snapshot age in days |
 | `SNAPSHOT_EXCLUDE` | (regex) | inotifywait exclude patterns |
 
-Changes require `systemctl --user restart home-snapshot`.
+Changes require `systemctl restart home-snapshot`.
 
 ## Code Style
 

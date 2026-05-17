@@ -4,23 +4,25 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"os"
+	"sync/atomic"
 	"time"
 )
 
 type Server struct {
 	httpServer *http.Server
 	updateCh   <-chan *Config
-	currentMux *http.ServeMux
 	handler    *atomicHandler
 }
 
 type atomicHandler struct {
-	handler http.Handler
+	handler atomic.Value
 }
 
 func NewServer(cfg *Config, updateCh <-chan *Config) *Server {
 	mux := buildMux(cfg)
-	h := &atomicHandler{handler: mux}
+	h := &atomicHandler{}
+	h.handler.Store(mux)
 
 	s := &Server{
 		updateCh: updateCh,
@@ -50,7 +52,7 @@ func (s *Server) Stop() {
 func (s *Server) watchUpdates() {
 	for cfg := range s.updateCh {
 		mux := buildMux(cfg)
-		s.handler.handler = mux
+		s.handler.handler.Store(mux)
 		slog.Info("routes updated", "count", len(cfg.Routes))
 
 		if s.httpServer.Addr != cfg.Server.Listen {
@@ -60,14 +62,17 @@ func (s *Server) watchUpdates() {
 }
 
 func (h *atomicHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.handler.ServeHTTP(w, r)
+	h.handler.Load().(http.Handler).ServeHTTP(w, r)
 }
 
 func buildMux(cfg *Config) *http.ServeMux {
 	mux := http.NewServeMux()
 
 	for _, route := range cfg.Routes {
-		handler := newCommandHandler(route, cfg.Server.Timeout)
+		if _, err := os.Stat(route.Command); err != nil {
+			slog.Warn("route command not found", "path", route.Path, "command", route.Command)
+		}
+		handler := newCommandHandler(route, cfg.Server.Timeout, cfg.Server.MaxBodySize)
 		mux.Handle(route.Path, handler)
 	}
 

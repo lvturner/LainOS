@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -13,20 +16,39 @@ import (
 	"time"
 )
 
-func newCommandHandler(route Route, timeout time.Duration) http.Handler {
+func newCommandHandler(route Route, timeout time.Duration, maxBodySize int64) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if route.Method != "" && r.Method != route.Method {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
+		defer r.Body.Close()
+
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxBodySize+1))
 		if err != nil {
 			slog.Error("failed to read body", "error", err)
 			http.Error(w, "failed to read body", http.StatusInternalServerError)
 			return
 		}
-		r.Body.Close()
+		if int64(len(body)) > maxBodySize {
+			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
+
+		if route.Secret != "" {
+			sigHeader := r.Header.Get("X-Hub-Signature-256")
+			if sigHeader == "" {
+				slog.Warn("missing signature", "path", route.Path)
+				http.Error(w, "missing signature", http.StatusUnauthorized)
+				return
+			}
+			if !validateHMAC(body, route.Secret, sigHeader) {
+				slog.Warn("invalid signature", "path", route.Path)
+				http.Error(w, "invalid signature", http.StatusForbidden)
+				return
+			}
+		}
 
 		ctx, cancel := context.WithTimeout(r.Context(), timeout)
 		defer cancel()
@@ -47,7 +69,8 @@ func newCommandHandler(route Route, timeout time.Duration) http.Handler {
 
 		for key, values := range r.Header {
 			envKey := "WH_HEADER_" + strings.ToUpper(strings.ReplaceAll(key, "-", "_"))
-			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", envKey, values[0]))
+			envVal := strings.Join(values, ",")
+			cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", envKey, envVal))
 		}
 
 		if err := cmd.Run(); err != nil {
@@ -64,4 +87,18 @@ func newCommandHandler(route Route, timeout time.Duration) http.Handler {
 		w.WriteHeader(http.StatusOK)
 		w.Write(stdout.Bytes())
 	})
+}
+
+func validateHMAC(body []byte, secret, sigHeader string) bool {
+	if !strings.HasPrefix(sigHeader, "sha256=") {
+		return false
+	}
+	sig, err := hex.DecodeString(strings.TrimPrefix(sigHeader, "sha256="))
+	if err != nil {
+		return false
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(body)
+	expected := mac.Sum(nil)
+	return hmac.Equal(sig, expected)
 }

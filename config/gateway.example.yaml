@@ -6,6 +6,7 @@ routes:
   - path: "/webhook/github"
     command: "/home/lainos/workspace/scripts/handle-github.sh"
     method: "POST"
+    secret: "${WEBHOOK_SECRET}"
 
   - path: "/webhook/github/async"
     command: "/home/lainos/workspace/scripts/handle-github-push-async.sh"

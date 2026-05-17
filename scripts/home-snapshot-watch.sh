@@ -37,7 +37,8 @@ inotifywait -m -r -e modify,create,delete,moved_to,moved_from \
     now=$(date +%s)
     elapsed=$((now - last_snapshot))
     if [ "$elapsed" -ge "$SNAPSHOT_INTERVAL" ]; then
-        /usr/local/bin/home-snapshot.sh
-        last_snapshot=$now
+        if /usr/local/bin/home-snapshot.sh; then
+            last_snapshot=$now
+        fi
     fi
 done

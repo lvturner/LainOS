@@ -13,14 +13,16 @@ type Config struct {
 }
 
 type ServerConfig struct {
-	Listen string        `yaml:"listen"`
-	Timeout time.Duration `yaml:"timeout"`
+	Listen      string        `yaml:"listen"`
+	Timeout     time.Duration `yaml:"timeout"`
+	MaxBodySize int64         `yaml:"max_body_size"`
 }
 
 type Route struct {
 	Path    string `yaml:"path"`
 	Command string `yaml:"command"`
 	Method  string `yaml:"method"`
+	Secret  string `yaml:"secret"`
 }
 
 func LoadConfig(path string) (*Config, error) {
@@ -40,10 +42,16 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Server.Timeout == 0 {
 		cfg.Server.Timeout = 30 * time.Second
 	}
+	if cfg.Server.MaxBodySize == 0 {
+		cfg.Server.MaxBodySize = 10 << 20
+	}
 
 	for i := range cfg.Routes {
 		if cfg.Routes[i].Method == "" {
 			cfg.Routes[i].Method = "POST"
+		}
+		if cfg.Routes[i].Secret != "" {
+			cfg.Routes[i].Secret = os.ExpandEnv(cfg.Routes[i].Secret)
 		}
 	}
 

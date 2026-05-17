@@ -8,7 +8,8 @@ import (
 	openai "github.com/sashabaranov/go-openai"
 )
 
-const compactionSystemPrompt = `You are a conversation compaction assistant. Produce an extremely concise summary of the conversation below. Target no more than 15% of the original conversation length.
+const (
+	compactionSystemPrompt = `You are a conversation compaction assistant. Produce an extremely concise summary of the conversation below. Target no more than 15% of the original conversation length.
 
 Compression rules:
 - Tool outputs (file reads, grep results, command outputs): keep only the key findings or results. Drop raw output verbatim.
@@ -20,9 +21,11 @@ Compression rules:
 
 Output only the summary. No commentary, greetings, or explanations.`
 
-const charsPerToken = 4
-
-const tokenSafetyMultiplier = 1.2
+	charsPerToken         = 4
+	tokenSafetyMultiplier = 1.2
+	compactionLoopThreshold = 2
+	compactionThresholdBoost = 25
+)
 
 func estimateTokens(messages []openai.ChatCompletionMessage) int {
 	total := 0
@@ -57,8 +60,8 @@ func (c *LLMClient) needsCompaction() bool {
 		estimated = estimateTokens(c.history)
 	}
 	effectiveThreshold := c.compactionThreshold + c.thresholdBoost
-	if effectiveThreshold > 90 {
-		effectiveThreshold = 90
+	if effectiveThreshold > maxCompactionThresholdPct {
+		effectiveThreshold = maxCompactionThresholdPct
 	}
 	threshold := int(float64(c.contextLength) * float64(effectiveThreshold) / 100.0)
 	return estimated >= threshold
@@ -142,11 +145,11 @@ func (c *LLMClient) compact(ctx context.Context, ch chan<- StreamEvent) {
 	c.history = newHistory
 	c.lastUsage = nil
 	c.compactionCount++
-	if c.compactionCount >= 2 && c.thresholdBoost == 0 {
-		c.thresholdBoost = 25
+	if c.compactionCount >= compactionLoopThreshold && c.thresholdBoost == 0 {
+		c.thresholdBoost = compactionThresholdBoost
 		effectiveThreshold := c.compactionThreshold + c.thresholdBoost
-		if effectiveThreshold > 90 {
-			effectiveThreshold = 90
+		if effectiveThreshold > maxCompactionThresholdPct {
+			effectiveThreshold = maxCompactionThresholdPct
 		}
 		slog.Warn("compaction loop detected, raising threshold", "original", c.compactionThreshold, "boosted", effectiveThreshold)
 		ch <- StreamEvent{Type: "compaction_loop", Content: fmt.Sprintf("compaction loop detected — threshold raised to %d%% to prevent repeated compaction", effectiveThreshold)}

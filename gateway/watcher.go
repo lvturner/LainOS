@@ -40,6 +40,11 @@ func NewWatcher(path string, updateCh chan<- *Config) (*Watcher, error) {
 }
 
 func (w *Watcher) Close() {
+	w.mu.Lock()
+	if w.timer != nil {
+		w.timer.Stop()
+	}
+	w.mu.Unlock()
 	w.fw.Close()
 }
 

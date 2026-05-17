@@ -13,6 +13,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+const (
+	defaultPluginExecTimeout = 30 * time.Second
+	maxConsecutiveFailures   = 3
+)
+
 type luaCallback struct {
 	L  *lua.LState
 	Fn *lua.LFunction
@@ -187,9 +192,10 @@ func (w *pluginWindow) triggerRender(resultCh chan<- pluginRenderMsg) {
 			select {
 			case errCh <- PluginError{PluginName: pluginName, Error: msg.err.Error(), Source: "render", Timestamp: time.Now()}:
 			default:
+				slog.Warn("plugin error channel full, dropping render error", "plugin", pluginName, "error", msg.err)
 			}
 			w.executor.consecutiveFailures++
-			if w.executor.consecutiveFailures >= 3 {
+			if w.executor.consecutiveFailures >= maxConsecutiveFailures {
 				w.executor.unhealthy = true
 			}
 		} else {
@@ -298,6 +304,7 @@ func (api *PluginAPI) sendPluginError(pluginName, errMsg, source string) {
 		Timestamp:  time.Now(),
 	}:
 	default:
+		slog.Warn("plugin error channel full, dropping error", "plugin", pluginName, "error", errMsg, "source", source)
 	}
 }
 
@@ -444,6 +451,7 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 		select {
 		case api.chatMsgCh <- pluginChatSendMsg{content: content}:
 		default:
+			slog.Warn("plugin chat channel full, dropping message", "content_len", len(content))
 		}
 		return 0
 	}))
@@ -585,6 +593,7 @@ func (api *PluginAPI) Inject(L *lua.LState, pluginName string) {
 				err:      err,
 			}:
 			default:
+				slog.Warn("plugin exec result channel full, dropping result", "plugin", pluginName)
 			}
 		}()
 		return 0
@@ -643,6 +652,7 @@ func (api *PluginAPI) luaWindowRegister(L *lua.LState, pluginName string, opts *
 							select {
 							case errCh <- PluginError{PluginName: pluginName, Error: err.Error(), Source: "tick", Timestamp: time.Now()}:
 							default:
+								slog.Warn("plugin error channel full, dropping tick error", "plugin", pluginName, "error", err)
 							}
 						}
 					}
@@ -826,7 +836,7 @@ func getFunctionField(L *lua.LState, tbl *lua.LTable, key string) *lua.LFunction
 }
 
 func parseExecOpts(L *lua.LState) (timeout time.Duration, cwd string, env map[string]string) {
-	timeout = 30 * time.Second
+	timeout = defaultPluginExecTimeout
 	if L.GetTop() >= 2 {
 		if opts, ok := L.Get(2).(*lua.LTable); ok {
 			if v := L.RawGet(opts, lua.LString("timeout")); v != lua.LNil {

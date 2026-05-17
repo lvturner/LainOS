@@ -14,6 +14,12 @@ import (
 	lua "github.com/yuin/gopher-lua"
 )
 
+const (
+	pluginDebounceInterval    = 500 * time.Millisecond
+	pluginCallBuffer          = 100 * time.Millisecond
+	pluginExecCallbackTimeout = 5 * time.Second
+)
+
 type pluginEventMsg struct {
 	action   string
 	filename string
@@ -74,6 +80,7 @@ func (pl *PluginLoader) sendError(pluginName, errMsg, source string) {
 		Timestamp:  time.Now(),
 	}:
 	default:
+		slog.Warn("plugin error channel full, dropping error", "plugin", pluginName, "error", errMsg)
 	}
 }
 
@@ -282,7 +289,7 @@ func (pl *PluginLoader) watchLoop() {
 			if debounceTimer != nil {
 				debounceTimer.Stop()
 			}
-			debounceTimer = time.AfterFunc(500*time.Millisecond, func() {
+			debounceTimer = time.AfterFunc(pluginDebounceInterval, func() {
 				events := make(map[string]bool)
 				pl.mu.Lock()
 				for k, v := range pendingEvents {
@@ -297,11 +304,13 @@ func (pl *PluginLoader) watchLoop() {
 						select {
 						case pl.eventCh <- pluginEventMsg{action: "remove", filename: name}:
 						default:
+							slog.Warn("plugin event channel full, dropping remove event", "filename", name)
 						}
 					} else {
 						select {
 						case pl.eventCh <- pluginEventMsg{action: "reload", filename: name}:
 						default:
+							slog.Warn("plugin event channel full, dropping reload event", "filename", name)
 						}
 					}
 				}
@@ -399,7 +408,7 @@ func (e *pluginExecutor) call(fn *lua.LFunction, args []lua.LValue, nRet int, ti
 	select {
 	case r := <-retCh:
 		return r, nil
-	case <-time.After(timeout + 100*time.Millisecond):
+	case <-time.After(timeout + pluginCallBuffer):
 		return pluginResult{}, fmt.Errorf("executor call timed out")
 	}
 }
@@ -422,15 +431,17 @@ func (e *pluginExecutor) callAsync(fn *lua.LFunction, args []lua.LValue, nRet in
 					select {
 					case errCh <- PluginError{PluginName: pluginName, Error: r.err.Error(), Source: source, Timestamp: time.Now()}:
 					default:
+						slog.Warn("plugin error channel full, dropping async error", "plugin", pluginName, "error", r.err)
 					}
 				}
-			case <-time.After(timeout + 100*time.Millisecond):
+			case <-time.After(timeout + pluginCallBuffer):
 			}
 		}()
 	default:
 		select {
 		case errCh <- PluginError{PluginName: pluginName, Error: "executor queue full", Source: source, Timestamp: time.Now()}:
 		default:
+			slog.Warn("plugin error channel full, dropping queue-full error", "plugin", pluginName)
 		}
 	}
 }
@@ -465,7 +476,7 @@ func (e *pluginExecutor) run() {
 			}
 			c.ret <- pluginResult{values: values, err: err}
 		case r := <-e.execResultCh:
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), pluginExecCallbackTimeout)
 			e.L.SetContext(ctx)
 			t := e.L.NewTable()
 			e.L.SetField(t, "stdout", lua.LString(r.stdout))
@@ -499,7 +510,7 @@ func (e *pluginExecutor) doString(src string, timeout time.Duration) error {
 	select {
 	case r := <-retCh:
 		return r.err
-	case <-time.After(timeout + 100*time.Millisecond):
+	case <-time.After(timeout + pluginCallBuffer):
 		return fmt.Errorf("plugin load timed out")
 	}
 }

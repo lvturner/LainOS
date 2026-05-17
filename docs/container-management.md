@@ -112,10 +112,10 @@ cp -a --reflink=auto /snapshots/home-2026-05-05T08-00-00/.config ~/.config
 
 # Change snapshot interval
 vim ~/config/snapshot.conf
-systemctl --user restart home-snapshot
+systemctl restart home-snapshot
 
 # Trigger cleanup immediately
-systemctl --user start home-snapshot-cleanup
+systemctl start home-snapshot-cleanup
 ```
 
 See **[snapshots.md](snapshots.md)** for full setup, configuration, and troubleshooting.

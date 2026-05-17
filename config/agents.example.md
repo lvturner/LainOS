@@ -69,10 +69,10 @@ Every handler script receives the request body on **stdin** and these environmen
 
 ### Gateway service management
 
-The gateway runs as a systemd service (`wh-gateway`). To restart it:
+The gateway runs as a user-level systemd service (`wh-gateway`). To restart it:
 
 ```bash
-systemctl restart wh-gateway
+systemctl --user restart wh-gateway
 ```
 
 This is rarely needed since config changes are hot-reloaded, but useful if the service crashes or you need to debug.
@@ -87,7 +87,7 @@ Edit `/home/lainos/config/snapshot.conf` and restart the watcher:
 
 ```bash
 vim ~/config/snapshot.conf
-systemctl --user restart home-snapshot
+systemctl restart home-snapshot
 ```
 
 Key settings:
@@ -120,18 +120,18 @@ diff -r /snapshots/home-2026-05-05T08-00-00/workspace ~/workspace
 /usr/local/bin/home-snapshot.sh
 
 # Trigger cleanup immediately
-systemctl --user start home-snapshot-cleanup
+systemctl start home-snapshot-cleanup
 
 # View snapshot service logs
-journalctl --user -u home-snapshot -f
+journalctl -u home-snapshot -f
 ```
 
 ### Retention policy
 
 - All snapshots kept for 1 hour
-- 1 per hour for 24 hours
-- 1 per day for 7 days
-- 1 per week for 30 days
+- 1 per hour (closest to HH:00:00) for 24 hours
+- 1 per day (closest to 00:00:00) for 7 days
+- 1 per week (closest to Sunday 00:00:00) for 30 days
 - Older than 30 days: deleted
 
 ### Excluded directories
